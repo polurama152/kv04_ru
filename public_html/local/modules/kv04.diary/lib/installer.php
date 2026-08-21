@@ -19,8 +19,36 @@ class Installer
 	public const IBLOCK_TYPE = 'kv04';
 	public const IBLOCK_CODE = 'diary';
 
-	public static function ensure(): void
+	/**
+	 * Версия схемы данных. Поднимать при изменении структуры HL или инфоблока —
+	 * это заставит ensure() один раз переприменить схему на каждом сервере.
+	 */
+	private const SCHEMA_VERSION = '1';
+	private const OPTION_SCHEMA = 'schema_version';
+
+	/** Схема уже проверена в этом процессе. */
+	private static bool $ensured = false;
+
+	/**
+	 * Идемпотентно создаёт HL, инфоблок и pepper.
+	 *
+	 * Быстрый путь: если схема нужной версии уже применена, метод не делает
+	 * ни одного запроса — только чтение опций модуля, которые Bitrix и так
+	 * держит в памяти после первого Option::get за запрос.
+	 */
+	public static function ensure(bool $force = false): void
 	{
+		if (self::$ensured && !$force)
+		{
+			return;
+		}
+
+		if (!$force && self::isSchemaApplied())
+		{
+			self::$ensured = true;
+			return;
+		}
+
 		if (!Loader::includeModule('highloadblock') || !Loader::includeModule('iblock'))
 		{
 			return;
@@ -35,8 +63,35 @@ class Installer
 		$hlId = self::ensureHighload();
 		$iblockId = self::ensureIblock();
 
-		Option::set(self::MODULE_ID, 'hlblock_id', (string)$hlId);
-		Option::set(self::MODULE_ID, 'iblock_id', (string)$iblockId);
+		self::setOption('hlblock_id', (string)$hlId);
+		self::setOption('iblock_id', (string)$iblockId);
+		self::setOption(self::OPTION_SCHEMA, self::SCHEMA_VERSION);
+
+		self::$ensured = true;
+	}
+
+	/**
+	 * Схема применена, если совпала версия и на месте все три опции.
+	 * Идентификаторы проверяем отдельно: если HL или инфоблок удалили руками,
+	 * ensure() отработает заново, а не сочтёт себя молча выполненным.
+	 */
+	private static function isSchemaApplied(): bool
+	{
+		return (string)Option::get(self::MODULE_ID, self::OPTION_SCHEMA, '') === self::SCHEMA_VERSION
+			&& (int)Option::get(self::MODULE_ID, 'hlblock_id', '0') > 0
+			&& (int)Option::get(self::MODULE_ID, 'iblock_id', '0') > 0
+			&& (string)Option::get(self::MODULE_ID, 'pepper', '') !== '';
+	}
+
+	/** Option::set пишет в b_option безусловно, поэтому сверяем значение сами. */
+	private static function setOption(string $name, string $value): void
+	{
+		if ((string)Option::get(self::MODULE_ID, $name, '') === $value)
+		{
+			return;
+		}
+
+		Option::set(self::MODULE_ID, $name, $value);
 	}
 
 	private static function ensurePepper(): void
