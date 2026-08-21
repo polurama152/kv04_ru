@@ -3,6 +3,7 @@
 namespace Kv04\Diary;
 
 use Bitrix\Highloadblock\HighloadBlockTable;
+use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use Bitrix\Main\ModuleManager;
@@ -20,10 +21,11 @@ class Installer
 	public const IBLOCK_CODE = 'diary';
 
 	/**
-	 * Версия схемы данных. Поднимать при изменении структуры HL или инфоблока —
-	 * это заставит ensure() один раз переприменить схему на каждом сервере.
+	 * Версия схемы данных. Поднимать при изменении структуры HL, инфоблока или
+	 * своих таблиц — это заставит ensure() один раз переприменить схему на
+	 * каждом сервере. 2: добавлена таблица попыток входа.
 	 */
-	private const SCHEMA_VERSION = '1';
+	private const SCHEMA_VERSION = '2';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -62,12 +64,41 @@ class Installer
 		self::ensurePepper();
 		$hlId = self::ensureHighload();
 		$iblockId = self::ensureIblock();
+		self::ensureAttemptsTable();
 
 		self::setOption('hlblock_id', (string)$hlId);
 		self::setOption('iblock_id', (string)$iblockId);
 		self::setOption(self::OPTION_SCHEMA, self::SCHEMA_VERSION);
 
 		self::$ensured = true;
+	}
+
+	/**
+	 * Таблица счётчиков неудачных попыток. Своя, а не b_option: Bitrix тянет
+	 * все опции модуля в память при первом Option::get и чистит их кэш на
+	 * каждую запись, см. AttemptLimiter.
+	 *
+	 * PRIMARY KEY по LOCK_KEY нужен апсерту в registerFail(), индекс по
+	 * LAST_FAIL — чистке протухших строк.
+	 */
+	private static function ensureAttemptsTable(): void
+	{
+		$connection = Application::getConnection();
+		if ($connection->isTableExists(AttemptLimiter::TABLE))
+		{
+			return;
+		}
+
+		$connection->queryExecute(
+			'CREATE TABLE IF NOT EXISTS ' . AttemptLimiter::TABLE . ' ('
+			. 'LOCK_KEY VARCHAR(64) NOT NULL,'
+			. 'FAILS INT NOT NULL DEFAULT 0,'
+			. 'LOCKED_UNTIL INT NOT NULL DEFAULT 0,'
+			. 'LAST_FAIL INT NOT NULL DEFAULT 0,'
+			. 'PRIMARY KEY (LOCK_KEY),'
+			. 'INDEX IX_KV04_DIARY_ATTEMPTS_LAST (LAST_FAIL)'
+			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
 	}
 
 	/**

@@ -41,33 +41,29 @@ class PinService
 			return ['ok' => false, 'error' => 'Введите 4 цифры'];
 		}
 
-		$ipLock = self::ipLockState();
-		if ($ipLock['locked'])
+		$ipKey = AttemptLimiter::ipKey(self::remoteAddress());
+		$state = AttemptLimiter::state($ipKey);
+		if ($state['locked'])
 		{
-			return ['ok' => false, 'error' => 'Вход временно заблокирован. Попробуйте завтра.', 'locked' => true];
+			return self::lockedResult($state['wait']);
 		}
 
-		$hash = self::hashPin($pin);
-		$row = self::findByHash($hash);
-
-		if ($row && (int)$row['UF_LOCKED_UNTIL'] > time())
-		{
-			return ['ok' => false, 'error' => 'Вход временно заблокирован. Попробуйте завтра.', 'locked' => true];
-		}
-
+		$row = self::findByHash(self::hashPin($pin));
 		if (!$row)
 		{
-			self::registerIpFail();
-			if (self::ipLockState()['locked'])
-			{
-				return ['ok' => false, 'error' => 'Вход временно заблокирован. Попробуйте завтра.', 'locked' => true];
-			}
-			return ['ok' => false, 'error' => 'Неверный пин'];
+			$after = AttemptLimiter::registerFail($ipKey);
+
+			return $after['locked']
+				? self::lockedResult($after['wait'])
+				: ['ok' => false, 'error' => 'Неверный пин'];
 		}
 
-		self::resetFails((int)$row['ID']);
-		self::resetIpFails();
+		// Счётчик по IP при успехе не сбрасываем: это грубый предохранитель от
+		// перебора, а не персональный счётчик. Владелец своего дневника иначе
+		// обнулял бы его удачным входом и перебирал чужие пины бесконечно.
+		// Протухнет сам через сутки без ошибок.
 		Auth::login((string)$row['UF_OWNER_ID']);
+
 		return ['ok' => true];
 	}
 
@@ -80,10 +76,25 @@ class PinService
 			return ['ok' => false, 'error' => 'Пины не совпадают'];
 		}
 
+		// Тот же счётчик, что и у входа. Без него create() был оракулом:
+		// 10 000 запросов перечисляли все существующие дневники по ответу
+		// «такой пин занят», а лимит входа не срабатывал ни разу, потому что
+		// неверных входов при этом не происходило.
+		$ipKey = AttemptLimiter::ipKey(self::remoteAddress());
+		$state = AttemptLimiter::state($ipKey);
+		if ($state['locked'])
+		{
+			return self::lockedResult($state['wait']);
+		}
+
 		$hash = self::hashPin($pin);
 		if (self::findByHash($hash))
 		{
-			return ['ok' => false, 'error' => 'Такой пин занят'];
+			$after = AttemptLimiter::registerFail($ipKey);
+
+			return $after['locked']
+				? self::lockedResult($after['wait'])
+				: ['ok' => false, 'error' => 'Такой пин занят'];
 		}
 
 		$dataClass = self::dataClass();
@@ -113,59 +124,22 @@ class PinService
 		return $row ?: null;
 	}
 
-	private static function resetFails(int $id): void
+	private static function lockedResult(int $wait): array
 	{
-		self::dataClass()::update($id, [
-			'UF_FAILS' => 0,
-			'UF_LOCKED_UNTIL' => 0,
-		]);
+		$human = AttemptLimiter::describeWait($wait);
+
+		return [
+			'ok' => false,
+			'error' => $human !== ''
+				? 'Слишком много попыток. Повторите через ' . $human
+				: 'Слишком много попыток. Повторите позже.',
+			'locked' => true,
+		];
 	}
 
-	private static function registerPinFail(array $row): void
+	private static function remoteAddress(): string
 	{
-		$fails = (int)$row['UF_FAILS'] + 1;
-		$fields = ['UF_FAILS' => $fails];
-		if ($fails >= self::MAX_FAILS)
-		{
-			$fields['UF_LOCKED_UNTIL'] = time() + self::LOCK_SECONDS;
-		}
-		self::dataClass()::update((int)$row['ID'], $fields);
-	}
-
-	private static function registerIpFail(): void
-	{
-		$state = self::ipLockState();
-		$count = $state['count'] + 1;
-		$lockedUntil = $count >= self::MAX_FAILS ? time() + self::LOCK_SECONDS : 0;
-		Option::set(Installer::MODULE_ID, self::ipOptionKey(), json_encode([
-			'count' => $count,
-			'locked_until' => $lockedUntil,
-		]));
-	}
-
-	private static function resetIpFails(): void
-	{
-		Option::delete(Installer::MODULE_ID, ['name' => self::ipOptionKey()]);
-	}
-
-	private static function ipLockState(): array
-	{
-		$raw = (string)Option::get(Installer::MODULE_ID, self::ipOptionKey(), '');
-		$data = $raw !== '' ? json_decode($raw, true) : [];
-		$lockedUntil = (int)($data['locked_until'] ?? 0);
-		$count = (int)($data['count'] ?? 0);
-		if ($lockedUntil > 0 && $lockedUntil <= time())
-		{
-			self::resetIpFails();
-			return ['count' => 0, 'locked' => false];
-		}
-		return ['count' => $count, 'locked' => $lockedUntil > time()];
-	}
-
-	private static function ipOptionKey(): string
-	{
-		$ip = Context::getCurrent()->getRequest()->getRemoteAddress();
-		return 'ipfail_' . hash_hmac('sha256', (string)$ip, self::pepper());
+		return (string)Context::getCurrent()->getRequest()->getRemoteAddress();
 	}
 
 	private static function dataClass()

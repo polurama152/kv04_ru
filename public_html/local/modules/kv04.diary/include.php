@@ -18,6 +18,7 @@ if (class_exists(ModuleManager::class) && !ModuleManager::isModuleInstalled($kv0
 
 $libDir = __DIR__ . '/lib/';
 require_once $libDir . 'installer.php';
+require_once $libDir . 'attemptlimiter.php';
 require_once $libDir . 'auth.php';
 require_once $libDir . 'pinservice.php';
 require_once $libDir . 'noteservice.php';
@@ -30,6 +31,7 @@ if (class_exists(Loader::class))
 	// and look in /bitrix/modules/kv04.diary/ instead of /local/modules/.
 	Loader::registerAutoLoadClasses(null, [
 		'Kv04\\Diary\\Installer' => '/local/modules/kv04.diary/lib/installer.php',
+		'Kv04\\Diary\\AttemptLimiter' => '/local/modules/kv04.diary/lib/attemptlimiter.php',
 		'Kv04\\Diary\\Auth' => '/local/modules/kv04.diary/lib/auth.php',
 		'Kv04\\Diary\\PinService' => '/local/modules/kv04.diary/lib/pinservice.php',
 		'Kv04\\Diary\\NoteService' => '/local/modules/kv04.diary/lib/noteservice.php',
