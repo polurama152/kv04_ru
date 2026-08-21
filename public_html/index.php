@@ -15,6 +15,19 @@ if (is_file($kv04DiaryLoad))
 
 $APPLICATION->SetTitle('Мой дневник');
 
+/**
+ * Статика отдаётся с Cache-Control на трое суток (mod_expires в .htaccess),
+ * поэтому без метки версии правка стилей доходит до вернувшегося посетителя
+ * только через трое суток. Подставляем mtime файла: кэш остаётся длинным,
+ * но новый файл получает новый URL.
+ */
+$kv04DiaryAsset = static function (string $path): string {
+	$file = $_SERVER['DOCUMENT_ROOT'] . $path;
+	$version = is_file($file) ? (int)filemtime($file) : 0;
+
+	return $version > 0 ? $path . '?v=' . $version : $path;
+};
+
 $kv04DiaryThemeCss = '/local/modules/kv04.diary/assets/diary-theme.css';
 $kv04DiaryComponentCss = '/local/components/kv04/diary.pin/templates/.default/style.css';
 $kv04DiaryFeed = $kv04DiaryLoaded && Auth::isLoggedIn();
@@ -31,9 +44,9 @@ if ($kv04DiaryFeed)
 	<meta name="theme-color" content="#0e1621">
 	<meta name="color-scheme" content="dark">
 	<title><?php $APPLICATION->ShowTitle(false) ?></title>
-	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryThemeCss) ?>">
+	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryThemeCss)) ?>">
 	<?php if ($kv04DiaryLoaded): ?>
-	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryComponentCss) ?>">
+	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryComponentCss)) ?>">
 	<?php endif; ?>
 	<?php if ($kv04DiaryFeed): ?>
 	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">

@@ -179,6 +179,10 @@
 	line-height: 1.5;
 	word-wrap: break-word;
 	overflow-wrap: anywhere;
+	/* Переносы строк из заметки — значимые. Без этого текст, вставленный
+	   без кнопки «Код», склеивается в одну строку: <br> санитайзер не
+	   добавляет, а обычный HTML пробельные символы схлопывает. */
+	white-space: pre-wrap;
 }
 
 .kv04-note__body:empty {
@@ -197,12 +201,13 @@
 	background: #282c34;
 	padding: 0.65rem 0.75rem;
 	border-radius: calc(var(--kv04-radius) - 2px);
-	overflow-x: auto;
+	/* Длинные строки переносим, а не прячем за горизонтальной прокруткой:
+	   на телефоне до правого края кода иначе не добраться. */
+	overflow-x: hidden;
 	overflow-y: hidden;
 	margin: 0.35rem 0 0;
 	border: none;
 	max-width: 100%;
-	-webkit-overflow-scrolling: touch;
 }
 
 .kv04-note__body pre:first-child {
@@ -220,9 +225,14 @@
 	background: transparent;
 	padding: 0;
 	border: none;
-	white-space: pre;
-	word-wrap: normal;
-	overflow-wrap: normal;
+	white-space: pre-wrap;
+	/* anywhere, а не break-word: в коде встречаются длинные неразрывные
+	   куски — пути, URL, base64, — которые иначе всё равно вылезут за край. */
+	overflow-wrap: anywhere;
+	/* Висячий отступ: перенесённая часть строки сдвинута, поэтому её
+	   не спутать с настоящей новой строкой. */
+	padding-left: 2ch;
+	text-indent: -2ch;
 }
 
 .kv04-note__body pre.hljs {
