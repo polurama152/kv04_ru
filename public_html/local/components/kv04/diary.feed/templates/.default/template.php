@@ -112,7 +112,13 @@ if (!function_exists('kv04DiaryRenderItems'))
 <?php endif; ?>
 
 	<form class="kv04-composer" data-composer>
-		<textarea name="text" rows="4" placeholder="Что у вас на уме? Можно код и файлы."></textarea>
+		<div class="kv04-note__body kv04-composer__input"
+			data-input
+			contenteditable="true"
+			role="textbox"
+			aria-multiline="true"
+			aria-label="Текст заметки"
+			data-placeholder="Что у вас на уме? Можно код и файлы."></div>
 		<div class="kv04-composer__bar">
 			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-code>Код</button>
 			<label class="kv04-btn kv04-btn--muted kv04-btn--sm">
@@ -154,7 +160,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 	if (!root) return;
 	var sessid = '<?=CUtil::JSEscape($arResult['SESSID'])?>';
 	var composer = root.querySelector('[data-composer]');
-	var textarea = composer.querySelector('textarea');
+	var input = composer.querySelector('[data-input]');
 	var list = root.querySelector('[data-list]');
 	var error = root.querySelector('[data-error]');
 	var filePreview = root.querySelector('[data-file-preview]');
@@ -162,22 +168,226 @@ if (!function_exists('kv04DiaryRenderItems'))
 	var pendingFiles = new DataTransfer();
 	var previewUrls = [];
 
-	function escapeHtml(text) {
+	// --- Редактор «что вижу, то и получаю» --------------------------------
+	//
+	// Заметка правится прямо в том узле, который вы читаете: contenteditable
+	// вешается на .kv04-note__body, разметка и стили не подменяются. Поэтому
+	// отступы, переносы и блоки кода при правке выглядят ровно как в ленте.
+
+	var NEWLINE = String.fromCharCode(10);
+
+	function closestPre(node) {
+		var el = node && node.nodeType === 1 ? node : (node ? node.parentNode : null);
+		return el && el.closest ? el.closest('pre') : null;
+	}
+
+	function currentRange(root) {
+		var sel = window.getSelection();
+		if (!sel || !sel.rangeCount) return null;
+		var range = sel.getRangeAt(0);
+		return root.contains(range.commonAncestorContainer) ? range : null;
+	}
+
+	function escapeForHtml(text) {
 		return String(text)
 			.replace(/&/g, '&amp;')
 			.replace(/</g, '&lt;')
 			.replace(/>/g, '&gt;');
 	}
 
-	function noteHtmlForEdit(html) {
-		var wrap = document.createElement('div');
-		wrap.innerHTML = html;
-		wrap.querySelectorAll('pre code').forEach(function (code) {
-			var pre = code.closest('pre');
-			if (!pre) return;
-			pre.innerHTML = '<code>' + escapeHtml(code.textContent || '') + '</code>';
+	// Текст узла, где <br> считается переводом строки. Contenteditable ставит
+	// именно <br>, а textContent их проглатывает — строки склеились бы.
+	// Заодно проходит сквозь span-ы подсветки.
+	function textWithBreaks(node) {
+		var out = '';
+		var children = node.childNodes;
+		for (var i = 0; i < children.length; i++) {
+			var child = children[i];
+			if (child.nodeType === 3) {
+				out += child.nodeValue;
+				continue;
+			}
+			if (child.nodeType !== 1) continue;
+			if (child.tagName.toLowerCase() === 'br') {
+				out += NEWLINE;
+				continue;
+			}
+			out += textWithBreaks(child);
+		}
+		return out;
+	}
+
+	function codeTextOf(pre) {
+		return textWithBreaks(pre.querySelector('code') || pre);
+	}
+
+	// Подсветка накладывается, когда каретка ушла из блока. Красить под
+	// курсором нельзя: hljs пересобирает содержимое узла, и каретка уезжает.
+	function highlightCodeBlock(pre) {
+		var code = pre.querySelector('code');
+		if (!code) return;
+		var text = codeTextOf(pre);
+		resetCodeBlock(code);
+		code.textContent = text;
+		if (!window.hljs) return;
+		try { hljs.highlightElement(code); } catch (err) {}
+	}
+
+	// Приводим содержимое к тому виду, в котором заметки и хранятся: обычный
+	// текст с переносами плюс блоки кода. Contenteditable по своей воле
+	// заворачивает строки в <div> и <br> — превращаем их обратно в переносы,
+	// иначе разметка редактора протекла бы в базу. Подсветку снимаем здесь же,
+	// иначе span-ы hljs осели бы в тексте и наложились сами на себя.
+	function serializeForSave(root) {
+		var out = '';
+
+		function walk(node) {
+			var children = node.childNodes;
+			for (var i = 0; i < children.length; i++) {
+				var child = children[i];
+
+				if (child.nodeType === 3) {
+					out += escapeForHtml(child.nodeValue);
+					continue;
+				}
+				if (child.nodeType !== 1) continue;
+
+				var tag = child.tagName.toLowerCase();
+
+				if (tag === 'pre') {
+					out += '<pre><code>' + escapeForHtml(codeTextOf(child)) + '</code></pre>';
+					continue;
+				}
+				if (tag === 'br') {
+					out += NEWLINE;
+					continue;
+				}
+				if (tag === 'div' || tag === 'p') {
+					if (out !== '' && out.slice(-1) !== NEWLINE) {
+						out += NEWLINE;
+					}
+					// <div><br></div> — это одна пустая строка, а не две.
+					var onlyBreak = child.childNodes.length === 1
+						&& child.firstChild.nodeName === 'BR';
+					if (!onlyBreak) walk(child);
+					continue;
+				}
+
+				walk(child);
+			}
+		}
+
+		walk(root);
+
+		while (out.slice(-1) === NEWLINE) {
+			out = out.slice(0, -1);
+		}
+		return out;
+	}
+
+	function bindEditor(root, options) {
+		var opts = options || {};
+		var lastPre = null;
+
+		// Ушли из блока кода — красим тот, который покинули.
+		function syncHighlight() {
+			var range = currentRange(root);
+			var pre = range ? closestPre(range.startContainer) : null;
+			if (lastPre && lastPre !== pre && root.contains(lastPre)) {
+				highlightCodeBlock(lastPre);
+			}
+			lastPre = pre;
+		}
+
+		document.addEventListener('selectionchange', syncHighlight);
+
+		root.addEventListener('blur', function () {
+			if (lastPre && root.contains(lastPre)) highlightCodeBlock(lastPre);
+			lastPre = null;
 		});
-		return wrap.innerHTML;
+
+		root.addEventListener('keydown', function (e) {
+			if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+				e.preventDefault();
+				if (opts.onSave) opts.onSave();
+				return;
+			}
+			if (e.key !== 'Enter') return;
+
+			var sel = window.getSelection();
+			if (!closestPre(sel && sel.anchorNode)) {
+				// Снаружи блока кода браузеру не мешаем: его <div> и <br>
+				// сериализатор всё равно превратит обратно в переносы.
+				return;
+			}
+			// Внутри кода нужен перенос строки, а не новый абзац. Родная
+			// команда браузера делает это корректно и сохраняет отмену —
+			// ручная правка DOM здесь сбивала каретку через раз.
+			e.preventDefault();
+			document.execCommand('insertLineBreak');
+		});
+
+		root.addEventListener('paste', function (e) {
+			var images = collectClipboardImages(e.clipboardData && e.clipboardData.items);
+			if (images.length && opts.onImages) {
+				e.preventDefault();
+				opts.onImages(images);
+				return;
+			}
+			// Только текст: чужой HTML в заметку не пускаем, да и вставленное
+			// форматирование всё равно срезал бы санитайзер на сервере.
+			var text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+			e.preventDefault();
+			document.execCommand('insertText', false, text);
+		});
+	}
+
+	// Кнопка «Код»: снаружи блока — завернуть выделение, внутри — выйти следом.
+	function toggleCodeBlock(root) {
+		root.focus();
+		var range = currentRange(root);
+		if (!range) return;
+
+		var sel = window.getSelection();
+		var pre = closestPre(range.startContainer);
+
+		if (pre) {
+			highlightCodeBlock(pre);
+			var after = pre.nextSibling;
+			if (!after || after.nodeType !== 3) {
+				after = document.createTextNode(NEWLINE);
+				pre.parentNode.insertBefore(after, pre.nextSibling);
+			}
+			var out = document.createRange();
+			out.setStart(after, Math.min(1, after.nodeValue.length));
+			out.collapse(true);
+			sel.removeAllRanges();
+			sel.addRange(out);
+			return;
+		}
+
+		var text = range.toString();
+		var block = document.createElement('pre');
+		var code = document.createElement('code');
+		// Пустой <code> — негодная цель для каретки: браузер выносит ввод
+		// наружу, и набранное оказывается в <pre> мимо блока. Поэтому у блока
+		// всегда есть текстовый узел.
+		var holder = document.createTextNode(text !== '' ? text : NEWLINE);
+		code.appendChild(holder);
+		block.appendChild(code);
+		range.deleteContents();
+		range.insertNode(block);
+
+		var inside = document.createRange();
+		inside.setStart(holder, text !== '' ? holder.nodeValue.length : 0);
+		inside.collapse(true);
+		sel.removeAllRanges();
+		sel.addRange(inside);
+	}
+
+	function inCodeBlock(root) {
+		var range = currentRange(root);
+		return !!(range && closestPre(range.startContainer));
 	}
 
 	function resetCodeBlock(code) {
@@ -194,7 +404,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 		if (!window.hljs) return;
 		var rootEl = scope && scope.querySelectorAll ? scope : list;
 		rootEl.querySelectorAll('pre code').forEach(function (el) {
-			if (el.closest('.kv04-textarea, textarea, [data-composer]')) return;
+			if (el.closest('[data-composer]')) return;
 			resetCodeBlock(el);
 			try {
 				hljs.highlightElement(el);
@@ -323,13 +533,21 @@ if (!function_exists('kv04DiaryRenderItems'))
 		setPendingFiles(fileInput.files, false);
 	});
 
-	composer.querySelector('[data-code]').addEventListener('click', function () {
-		var start = textarea.selectionStart;
-		var end = textarea.selectionEnd;
-		var selected = textarea.value.slice(start, end) || 'код';
-		var wrap = '<pre><code>' + escapeHtml(selected) + '</code></pre>';
-		textarea.value = textarea.value.slice(0, start) + wrap + textarea.value.slice(end);
+	var codeBtn = composer.querySelector('[data-code]');
+	codeBtn.addEventListener('click', function () {
+		toggleCodeBlock(input);
+		syncCodeButton();
 	});
+
+	// Подпись зависит от того, где каретка: снаружи блока кнопка заворачивает
+	// выделение, внутри — выводит наружу. Без этого из блока было бы не выйти.
+	function syncCodeButton() {
+		if (document.activeElement !== input && !input.contains(document.activeElement)) return;
+		var inside = inCodeBlock(input);
+		codeBtn.textContent = inside ? 'Текст' : 'Код';
+		codeBtn.title = inside ? 'Выйти из блока кода' : 'Обернуть выделение в код';
+	}
+	document.addEventListener('selectionchange', syncCodeButton);
 
 	var saveShortcutLabel = (navigator.platform || '').indexOf('Mac') !== -1 ? '\u2318+Enter' : 'Ctrl+Enter';
 	var composerSubmit = composer.querySelector('[type=submit]');
@@ -340,7 +558,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 	function buildComposerFormData() {
 		var body = new FormData();
 		body.append('action', 'add');
-		body.append('text', textarea.value);
+		body.append('text', serializeForSave(input));
 		for (var i = 0; i < pendingFiles.files.length; i++) {
 			body.append('media[]', pendingFiles.files[i]);
 		}
@@ -388,7 +606,8 @@ if (!function_exists('kv04DiaryRenderItems'))
 		post(buildComposerFormData(), true).then(function (data) {
 			if (composerSubmit) composerSubmit.disabled = false;
 			if (!data.ok) { setError(data.error || 'Ошибка'); return; }
-			textarea.value = '';
+			input.innerHTML = '';
+			syncPlaceholder();
 			clearComposerFiles();
 			// Раньше здесь был location.reload(): полный проход по стеку
 			// ради одной новой заметки. Сервер уже вернул готовый элемент.
@@ -408,12 +627,19 @@ if (!function_exists('kv04DiaryRenderItems'))
 		submitComposer();
 	});
 
-	textarea.addEventListener('keydown', function (e) {
-		if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-			e.preventDefault();
-			submitComposer();
-		}
+	bindEditor(input, {
+		onSave: submitComposer,
+		onImages: function (files) { setPendingFiles(files, true); }
 	});
+
+	// Подсказку показываем по классу, а не по :empty: браузер сам кладёт <br>
+	// в пустой contenteditable, и селектор перестаёт срабатывать.
+	function syncPlaceholder() {
+		var empty = (input.textContent || '').trim() === '' && !input.querySelector('pre, img, video');
+		input.classList.toggle('is-empty', empty);
+	}
+	input.addEventListener('input', syncPlaceholder);
+	syncPlaceholder();
 
 	root.querySelector('[data-logout]').addEventListener('click', function () {
 		post({ action: 'logout' }).then(function () { location.reload(); });
@@ -462,18 +688,16 @@ if (!function_exists('kv04DiaryRenderItems'))
 	}
 
 	function closeEdit(note, html, hasBody) {
-		var area = note.querySelector('.kv04-textarea');
-		if (!area) return;
+		var body = note.querySelector('.kv04-note__body');
+		if (!body) return;
 		var bar = note.querySelector('.kv04-edit-bar');
 		if (bar) bar.remove();
+		body.removeAttribute('contenteditable');
 		if (hasBody || html) {
-			var body = document.createElement('div');
-			body.className = 'kv04-note__body';
 			body.innerHTML = html;
-			area.replaceWith(body);
 			highlight(body);
 		} else {
-			area.remove();
+			body.remove();
 		}
 		note.classList.remove('is-editing');
 		delete note._editCtx;
@@ -492,7 +716,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 	}
 
 	function isNoteEditClick(e, note) {
-		if (note.querySelector('.kv04-textarea')) return false;
+		if (note.classList.contains('is-editing')) return false;
 		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-edit], [data-delete], [data-media-delete], .kv04-note__ops, .kv04-edit-bar')) {
 			return false;
 		}
@@ -603,25 +827,26 @@ if (!function_exists('kv04DiaryRenderItems'))
 	}
 
 	function startEdit(note) {
-		if (note.querySelector('.kv04-textarea')) return;
+		if (note.classList.contains('is-editing')) return;
 		var id = note.getAttribute('data-id');
 		var body = note.querySelector('.kv04-note__body');
 		var hadBody = !!body;
-		var current = body ? noteHtmlForEdit(body.innerHTML) : '';
-		var area = document.createElement('textarea');
-		area.className = 'kv04-textarea';
-		area.rows = 6;
-		area.value = current;
-		if (body) {
-			body.replaceWith(area);
-		} else {
+		if (!body) {
+			body = document.createElement('div');
+			body.className = 'kv04-note__body';
 			var anchor = note.querySelector('.kv04-note__media') || note.querySelector('.kv04-note__footer');
-			note.insertBefore(area, anchor);
+			note.insertBefore(body, anchor);
 		}
+		// Правим ровно тот узел, который читали: ни разметка, ни стили не
+		// подменяются, поэтому отступы и блоки кода выглядят как в ленте.
+		var current = serializeForSave(body);
+		body.setAttribute('contenteditable', 'true');
 		note.classList.add('is-editing');
+
 		var bar = document.createElement('div');
 		bar.className = 'kv04-edit-bar';
 		bar.innerHTML =
+			'<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-edit-code>Код</button>' +
 			'<label class="kv04-btn kv04-btn--attach" title="Прикрепить">' +
 				'<svg class="kv04-icon-clip" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">' +
 					'<path fill="currentColor" d="M16.5 6v11.5a4 4 0 1 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 1 1-2 0V6h-1.5v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 1 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/>' +
@@ -631,45 +856,57 @@ if (!function_exists('kv04DiaryRenderItems'))
 			'</label>' +
 			'<span class="kv04-edit-bar__status" hidden></span>' +
 			'<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-edit-save>Готово</button>';
-		area.after(bar);
+		body.after(bar);
+
 		var save = bar.querySelector('[data-edit-save]');
 		var attachInput = bar.querySelector('input[type=file]');
+		var editCode = bar.querySelector('[data-edit-code]');
 		save.title = 'Готово (' + saveShortcutLabel + ')';
+
 		function doSave() {
 			save.disabled = true;
-			post({ action: 'edit', id: id, text: area.value }).then(function (data) {
+			var html = serializeForSave(body);
+			post({ action: 'edit', id: id, text: html }).then(function (data) {
 				save.disabled = false;
 				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
 				// Сервер вернул санитизированный HTML — ставим его вместо
-				// textarea. Раньше здесь была перезагрузка всей страницы.
-				var html = typeof data.text === 'string' ? data.text : area.value;
-				closeEdit(note, html, html !== '');
+				// набранного. Раньше здесь была перезагрузка всей страницы.
+				var saved = typeof data.text === 'string' ? data.text : html;
+				closeEdit(note, saved, saved !== '');
 			}).catch(function () {
 				save.disabled = false;
 				alert('Нет связи');
 			});
 		}
+
 		note._editCtx = { originalHtml: current, hadBody: hadBody, doSave: doSave };
 		save.addEventListener('click', doSave);
+
+		editCode.addEventListener('click', function () {
+			toggleCodeBlock(body);
+			editCode.textContent = inCodeBlock(body) ? 'Текст' : 'Код';
+		});
+
 		attachInput.addEventListener('change', function () {
 			if (!attachInput.files || !attachInput.files.length) return;
 			uploadAttach(note, attachInput.files, bar).then(function () {
 				attachInput.value = '';
 			});
 		});
-		area.addEventListener('paste', function (e) {
-			var files = collectClipboardImages(e.clipboardData && e.clipboardData.items);
-			if (!files.length) return;
-			e.preventDefault();
-			uploadAttach(note, files, bar);
+
+		bindEditor(body, {
+			onSave: doSave,
+			onImages: function (files) { uploadAttach(note, files, bar); }
 		});
-		area.addEventListener('keydown', function (e) {
-			if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-				e.preventDefault();
-				doSave();
-			}
-		});
-		area.focus();
+
+		body.focus();
+		// Каретка в конец, а не в начало — правят обычно хвост заметки.
+		var range = document.createRange();
+		range.selectNodeContents(body);
+		range.collapse(false);
+		var sel = window.getSelection();
+		sel.removeAllRanges();
+		sel.addRange(range);
 	}
 
 	list.addEventListener('click', function (e) {
@@ -698,13 +935,6 @@ if (!function_exists('kv04DiaryRenderItems'))
 		if (e.target.closest('[data-edit]') || isNoteEditClick(e, note)) {
 			startEdit(note);
 		}
-	});
-
-	textarea.addEventListener('paste', function (e) {
-		var files = collectClipboardImages(e.clipboardData && e.clipboardData.items);
-		if (!files.length) return;
-		e.preventDefault();
-		setPendingFiles(files, true);
 	});
 
 	var attachBox = root.querySelector('[data-attach-email]');
