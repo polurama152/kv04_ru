@@ -7,6 +7,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
 use Kv04\Diary\NoteService;
+use Kv04\Diary\PinService;
 
 class Kv04DiaryFeedComponent extends CBitrixComponent
 {
@@ -35,6 +36,9 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 
 		$this->arResult['OWNER'] = $ownerId;
 		$this->arResult['SESSID'] = bitrix_sessid();
+		// Дневник, заведённый до появления идентичности, просим привязать почту:
+		// без неё он остаётся в переходной ветке, где пин ищется глобально.
+		$this->arResult['NEEDS_EMAIL'] = !PinService::hasEmail($ownerId);
 		$this->arResult['ITEMS'] = NoteService::list($ownerId);
 		$this->includeComponentTemplate();
 	}
@@ -46,6 +50,12 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		{
 			Auth::clear();
 			$this->json(['ok' => true, 'reload' => true]);
+			return;
+		}
+
+		if ($action === 'attach_email')
+		{
+			$this->json(PinService::attachEmail($ownerId, (string)$this->request->getPost('email')));
 			return;
 		}
 

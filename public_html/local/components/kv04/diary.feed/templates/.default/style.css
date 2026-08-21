@@ -756,3 +756,47 @@ body.kv04-lightbox-open {
 		opacity: 1;
 	}
 }
+
+/* Просьба привязать почту — показывается только дневникам без идентичности. */
+.kv04-attach-email {
+	margin-bottom: 1rem;
+	padding: 0.9rem 1rem;
+	border: 1px solid var(--kv04-border);
+	border-left: 3px solid var(--kv04-accent);
+	border-radius: var(--kv04-radius);
+	background: var(--kv04-card);
+	transition: opacity 0.3s ease;
+}
+
+.kv04-attach-email.is-done {
+	opacity: 0;
+}
+
+.kv04-attach-email__text {
+	margin: 0 0 0.75rem;
+	color: var(--kv04-text-muted);
+	font-size: 0.9rem;
+	line-height: 1.45;
+}
+
+.kv04-attach-email__row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.kv04-attach-email__row .kv04-input {
+	flex: 1 1 14rem;
+	min-width: 0;
+}
+
+.kv04-attach-email__status {
+	margin: 0.6rem 0 0;
+	color: var(--kv04-text-muted);
+	font-size: 0.85rem;
+}
+
+.kv04-attach-email__status.is-error {
+	color: var(--kv04-danger);
+}

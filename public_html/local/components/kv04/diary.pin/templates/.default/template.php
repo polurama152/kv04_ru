@@ -4,9 +4,17 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	die();
 }
 ?>
-<div class="kv04-pin" id="kv04-pin">
+<div class="kv04-pin" id="kv04-pin" data-needs-email="<?=$arResult['NEEDS_EMAIL'] ? '1' : '0'?>">
 	<h1 class="kv04-pin__title">Мой дневник</h1>
-	<p class="kv04-pin__hint">Четыре цифры — ключ только для вас</p>
+	<p class="kv04-pin__hint"><?=$arResult['BOUND']
+		? 'С возвращением — введите пин'
+		: 'Четыре цифры — ключ только для вас'?></p>
+
+	<div class="kv04-pin__email" data-email-box<?=$arResult['NEEDS_EMAIL'] ? '' : ' hidden'?>>
+		<label for="kv04-pin-email">Почта</label>
+		<input type="email" id="kv04-pin-email" class="kv04-input" autocomplete="email"
+			inputmode="email" spellcheck="false" data-email placeholder="you@example.com">
+	</div>
 
 	<div class="kv04-pin__dots" data-dots>
 		<span></span><span></span><span></span><span></span>
@@ -39,6 +47,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		<button type="button" class="kv04-btn kv04-btn--primary" data-login>Войти</button>
 		<button type="button" class="kv04-btn kv04-btn--ghost" data-create>Создать дневник</button>
 	</div>
+<?php if ($arResult['BOUND']): ?>
+	<button type="button" class="kv04-pin__forget" data-forget>Это не мой дневник</button>
+<?php endif; ?>
 </div>
 
 <script>
@@ -50,6 +61,10 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	var confirmInput = root.querySelector('[data-pin-confirm]');
 	var dots = root.querySelectorAll('[data-dots] span');
 	var error = root.querySelector('[data-error]');
+	var emailBox = root.querySelector('[data-email-box]');
+	var emailInput = root.querySelector('[data-email]');
+	var forgetBtn = root.querySelector('[data-forget]');
+	var needsEmail = root.getAttribute('data-needs-email') === '1';
 	var creating = false;
 
 	function renderDots() {
@@ -104,6 +119,10 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		body.append('sessid', '<?=CUtil::JSEscape($arResult['SESSID'])?>');
 		body.append('action', action);
 		body.append('pin', pinInput.value);
+		// На знакомом устройстве почта не нужна: аккаунт известен по привязке.
+		if (emailInput && (action === 'create' || needsEmail)) {
+			body.append('email', emailInput.value);
+		}
 		if (action === 'create') {
 			body.append('pin_confirm', confirmInput.value);
 		}
@@ -137,12 +156,19 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	root.querySelector('[data-create]').addEventListener('click', function () {
 		if (!creating) {
 			creating = true;
+			if (emailBox) emailBox.hidden = false;
 			confirmBox.hidden = false;
-			setError('Придумайте пин и повторите его');
+			setError('Укажите почту, придумайте пин и повторите его');
+			if (emailInput) emailInput.focus();
 			return;
 		}
 		send('create');
 	});
+	if (forgetBtn) {
+		forgetBtn.addEventListener('click', function () {
+			send('forget_device');
+		});
+	}
 	pinInput.addEventListener('input', function () {
 		pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 4);
 		renderDots();

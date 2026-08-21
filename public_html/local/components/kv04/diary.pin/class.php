@@ -27,6 +27,9 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 		}
 
 		$this->arResult['SESSID'] = bitrix_sessid();
+		// На знакомом устройстве форма остаётся прежней: только пин.
+		$this->arResult['BOUND'] = Auth::boundOwnerId() !== null;
+		$this->arResult['NEEDS_EMAIL'] = PinService::needsEmail();
 		$this->includeComponentTemplate();
 	}
 
@@ -40,16 +43,25 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 			return;
 		}
 
+		if ($action === 'forget_device')
+		{
+			Auth::forgetDevice();
+			$this->json(['ok' => true, 'reload' => true]);
+			return;
+		}
+
 		$pin = (string)$this->request->getPost('pin');
+		$email = (string)$this->request->getPost('email');
+
 		if ($action === 'create')
 		{
-			$result = PinService::create($pin, (string)$this->request->getPost('pin_confirm'));
+			$result = PinService::create($email, $pin, (string)$this->request->getPost('pin_confirm'));
 			$result['reload'] = !empty($result['ok']);
 			$this->json($result);
 			return;
 		}
 
-		$result = PinService::login($pin);
+		$result = PinService::login($pin, $email);
 		$result['reload'] = !empty($result['ok']);
 		$this->json($result);
 	}

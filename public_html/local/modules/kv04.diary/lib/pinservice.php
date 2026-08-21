@@ -10,8 +10,6 @@ use Bitrix\Main\Loader;
 class PinService
 {
 	public const PIN_LENGTH = 4;
-	public const MAX_FAILS = 3;
-	public const LOCK_SECONDS = 86400;
 
 	public static function pepper(): string
 	{
@@ -33,7 +31,16 @@ class PinService
 		return hash_hmac('sha256', $pin, self::pepper());
 	}
 
-	public static function login(string $pin): array
+	/**
+	 * Вход. Аккаунт определяется по порядку: привязка устройства, затем почта,
+	 * затем legacy-поиск по пину для записей, у которых почты ещё нет.
+	 *
+	 * Раньше запись искали по хэшу пина во всём пространстве 10 000 комбинаций,
+	 * поэтому вероятность попасть в ЧУЖОЙ дневник равнялась N/10 000: при
+	 * тысяче пользователей обычная опечатка открывала чужие записи в 10%
+	 * случаев. Теперь пин проверяется внутри одного аккаунта.
+	 */
+	public static function login(string $pin, string $email = ''): array
 	{
 		$pin = self::normalize($pin);
 		if (!self::isValidFormat($pin))
@@ -42,32 +49,50 @@ class PinService
 		}
 
 		$ipKey = AttemptLimiter::ipKey(self::remoteAddress());
-		$state = AttemptLimiter::state($ipKey);
-		if ($state['locked'])
+		$ipState = AttemptLimiter::state($ipKey);
+		if ($ipState['locked'])
 		{
-			return self::lockedResult($state['wait']);
+			return self::lockedResult($ipState['wait']);
 		}
 
-		$row = self::findByHash(self::hashPin($pin));
-		if (!$row)
+		$row = self::resolveAccount($email, $pin);
+		if ($row)
 		{
-			$after = AttemptLimiter::registerFail($ipKey);
+			$accountKey = AttemptLimiter::accountKey((string)$row['UF_OWNER_ID']);
+			$accountState = AttemptLimiter::state($accountKey);
+			if ($accountState['locked'])
+			{
+				return self::lockedResult($accountState['wait']);
+			}
+
+			if (hash_equals((string)$row['UF_PIN_HASH'], self::hashPin($pin)))
+			{
+				// Счётчик аккаунта сбрасываем: владелец доказал, что это он.
+				// Счётчик по IP — нет, это грубый предохранитель от перебора,
+				// иначе владелец обнулял бы его удачным входом к себе и
+				// перебирал чужие пины по две догадки за цикл.
+				AttemptLimiter::reset($accountKey);
+				Auth::login((string)$row['UF_OWNER_ID']);
+
+				return ['ok' => true];
+			}
+
+			$after = AttemptLimiter::registerFail($accountKey);
+			AttemptLimiter::registerFail($ipKey);
 
 			return $after['locked']
 				? self::lockedResult($after['wait'])
 				: ['ok' => false, 'error' => 'Неверный пин'];
 		}
 
-		// Счётчик по IP при успехе не сбрасываем: это грубый предохранитель от
-		// перебора, а не персональный счётчик. Владелец своего дневника иначе
-		// обнулял бы его удачным входом и перебирал чужие пины бесконечно.
-		// Протухнет сам через сутки без ошибок.
-		Auth::login((string)$row['UF_OWNER_ID']);
+		$after = AttemptLimiter::registerFail($ipKey);
 
-		return ['ok' => true];
+		return $after['locked']
+			? self::lockedResult($after['wait'])
+			: ['ok' => false, 'error' => self::wrongCredentialsMessage($email)];
 	}
 
-	public static function create(string $pin, string $confirm): array
+	public static function create(string $email, string $pin, string $confirm): array
 	{
 		$pin = self::normalize($pin);
 		$confirm = self::normalize($confirm);
@@ -76,32 +101,38 @@ class PinService
 			return ['ok' => false, 'error' => 'Пины не совпадают'];
 		}
 
-		// Тот же счётчик, что и у входа. Без него create() был оракулом:
-		// 10 000 запросов перечисляли все существующие дневники по ответу
-		// «такой пин занят», а лимит входа не срабатывал ни разу, потому что
-		// неверных входов при этом не происходило.
-		$ipKey = AttemptLimiter::ipKey(self::remoteAddress());
-		$state = AttemptLimiter::state($ipKey);
-		if ($state['locked'])
+		$email = self::normalizeEmail($email);
+		if (!self::isValidEmail($email))
 		{
-			return self::lockedResult($state['wait']);
+			return ['ok' => false, 'error' => 'Введите почту'];
 		}
 
-		$hash = self::hashPin($pin);
-		if (self::findByHash($hash))
+		$ipKey = AttemptLimiter::ipKey(self::remoteAddress());
+		$ipState = AttemptLimiter::state($ipKey);
+		if ($ipState['locked'])
+		{
+			return self::lockedResult($ipState['wait']);
+		}
+
+		// Занятость ПОЧТЫ сообщать приходится — иначе человек не поймёт, почему
+		// не создаётся дневник. В отличие от прежнего «такой пин занят», это не
+		// раскрывает секрет: зная почту, войти всё равно нельзя. Плюс попытка
+		// стоит места в лестнице, так что перечислить чужие адреса не выйдет.
+		if (self::findByEmail($email))
 		{
 			$after = AttemptLimiter::registerFail($ipKey);
 
 			return $after['locked']
 				? self::lockedResult($after['wait'])
-				: ['ok' => false, 'error' => 'Такой пин занят'];
+				: ['ok' => false, 'error' => 'На эту почту дневник уже заведён'];
 		}
 
 		$dataClass = self::dataClass();
 		$ownerId = bin2hex(random_bytes(16));
 		$result = $dataClass::add([
-			'UF_PIN_HASH' => $hash,
+			'UF_PIN_HASH' => self::hashPin($pin),
 			'UF_OWNER_ID' => $ownerId,
+			'UF_EMAIL' => $email,
 			'UF_FAILS' => 0,
 			'UF_LOCKED_UNTIL' => 0,
 		]);
@@ -111,17 +142,131 @@ class PinService
 		}
 
 		Auth::login($ownerId);
+
 		return ['ok' => true];
 	}
 
-	private static function findByHash(string $hash): ?array
+	/** Привязать почту к дневнику, заведённому до появления идентичности. */
+	public static function attachEmail(string $ownerId, string $email): array
 	{
-		$dataClass = self::dataClass();
-		$row = $dataClass::getList([
-			'filter' => ['=UF_PIN_HASH' => $hash],
+		$email = self::normalizeEmail($email);
+		if (!self::isValidEmail($email))
+		{
+			return ['ok' => false, 'error' => 'Введите почту'];
+		}
+
+		$existing = self::findByEmail($email);
+		if ($existing && (string)$existing['UF_OWNER_ID'] !== $ownerId)
+		{
+			return ['ok' => false, 'error' => 'На эту почту дневник уже заведён'];
+		}
+
+		$row = self::findByOwner($ownerId);
+		if (!$row)
+		{
+			return ['ok' => false, 'error' => 'Дневник не найден'];
+		}
+
+		self::dataClass()::update((int)$row['ID'], ['UF_EMAIL' => $email]);
+
+		return ['ok' => true];
+	}
+
+	public static function normalizeEmail(string $email): string
+	{
+		return mb_strtolower(trim($email));
+	}
+
+	public static function isValidEmail(string $email): bool
+	{
+		return $email !== '' && mb_strlen($email) <= 180 && (bool)filter_var($email, FILTER_VALIDATE_EMAIL);
+	}
+
+	/** У дневника уже есть идентичность? Нужно ленте, чтобы попросить почту. */
+	public static function hasEmail(string $ownerId): bool
+	{
+		$row = self::findByOwner($ownerId);
+
+		return $row !== null && (string)$row['UF_EMAIL'] !== '';
+	}
+
+	/** Нужна ли форме почта: на знакомом устройстве обходимся пином. */
+	public static function needsEmail(): bool
+	{
+		return Auth::boundOwnerId() === null && self::hasAnyEmail();
+	}
+
+	private static function resolveAccount(string $email, string $pin): ?array
+	{
+		$bound = Auth::boundOwnerId();
+		if ($bound !== null)
+		{
+			$row = self::findByOwner($bound);
+			if ($row)
+			{
+				return $row;
+			}
+		}
+
+		$email = self::normalizeEmail($email);
+		if ($email !== '')
+		{
+			return self::findByEmail($email);
+		}
+
+		// Переходный период: дневники, заведённые до появления почты, ищутся
+		// по пину как раньше. Ветка исчезнет, когда у всех записей будет email.
+		return self::findLegacyByPin(self::hashPin($pin));
+	}
+
+	private static function wrongCredentialsMessage(string $email): string
+	{
+		return self::normalizeEmail($email) !== '' ? 'Неверная почта или пин' : 'Неверный пин';
+	}
+
+	private static function findOne(array $filter): ?array
+	{
+		$row = self::dataClass()::getList([
+			'select' => ['ID', 'UF_PIN_HASH', 'UF_OWNER_ID', 'UF_EMAIL'],
+			'filter' => $filter,
 			'limit' => 1,
 		])->fetch();
+
 		return $row ?: null;
+	}
+
+	private static function findByEmail(string $email): ?array
+	{
+		return self::findOne(['=UF_EMAIL' => $email]);
+	}
+
+	private static function findByOwner(string $ownerId): ?array
+	{
+		return self::findOne(['=UF_OWNER_ID' => $ownerId]);
+	}
+
+	/**
+	 * Поиск по пину во всём пространстве — только для записей без почты.
+	 * Именно эта выборка и порождала коллизии, поэтому ограничиваем её
+	 * незамигрированными дневниками и уберём совсем после переходного периода.
+	 */
+	private static function findLegacyByPin(string $pinHash): ?array
+	{
+		$row = self::findOne(['=UF_PIN_HASH' => $pinHash, '=UF_EMAIL' => false]);
+
+		return $row ?: self::findOne(['=UF_PIN_HASH' => $pinHash, '=UF_EMAIL' => '']);
+	}
+
+	/** Хоть у одного дневника уже есть почта — значит форме входа её спрашивать. */
+	private static function hasAnyEmail(): bool
+	{
+		$row = self::dataClass()::getList([
+			'select' => ['ID'],
+			'filter' => ['!=UF_EMAIL' => false],
+			'limit' => 1,
+		])->fetch();
+
+		return (bool)$row;
 	}
 
 	private static function lockedResult(int $wait): array

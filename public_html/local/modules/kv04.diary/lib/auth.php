@@ -12,6 +12,14 @@ class Auth
 	public const SESSION_EXPIRES = 'KV04_DIARY_EXPIRES';
 	public const LIFETIME = 36000;
 
+	/**
+	 * Привязка браузера к дневнику. Живёт год и переживает выход: на знакомом
+	 * устройстве достаточно пина, почта нужна только на новом. Сама по себе
+	 * доступа не даёт — говорит лишь, чей пин проверять.
+	 */
+	public const DEVICE_COOKIE = 'KV04_DIARY_DEVICE';
+	public const DEVICE_LIFETIME = 31536000;
+
 	public static function getOwnerId(): ?string
 	{
 		$now = time();
@@ -44,19 +52,45 @@ class Auth
 		$expires = time() + self::LIFETIME;
 		$_SESSION[self::SESSION_OWNER] = $ownerId;
 		$_SESSION[self::SESSION_EXPIRES] = $expires;
-		self::writeCookie($ownerId, $expires);
+		self::writeCookie(self::COOKIE, $ownerId, $expires);
+		self::rememberDevice($ownerId);
 	}
 
+	/** Чей дневник открывали в этом браузере в прошлый раз. */
+	public static function boundOwnerId(): ?string
+	{
+		$device = self::readCookie(self::DEVICE_COOKIE);
+
+		return $device && $device['expires'] > time() ? $device['owner'] : null;
+	}
+
+	public static function rememberDevice(string $ownerId): void
+	{
+		self::writeCookie(self::DEVICE_COOKIE, $ownerId, time() + self::DEVICE_LIFETIME);
+	}
+
+	/** «Это не мой дневник» — снять привязку, дальше снова спросим почту. */
+	public static function forgetDevice(): void
+	{
+		self::dropCookie(self::DEVICE_COOKIE);
+	}
+
+	/** Выход из сессии. Привязку устройства намеренно оставляем. */
 	public static function clear(): void
 	{
 		unset($_SESSION[self::SESSION_OWNER], $_SESSION[self::SESSION_EXPIRES]);
-		$cookie = new Cookie(self::COOKIE, '', time() - 3600);
+		self::dropCookie(self::COOKIE);
+	}
+
+	private static function dropCookie(string $name): void
+	{
+		$cookie = new Cookie($name, '', time() - 3600);
 		$cookie->setHttpOnly(true);
 		$cookie->setPath('/');
 		Application::getInstance()->getContext()->getResponse()->addCookie($cookie);
 		if (!headers_sent())
 		{
-			setcookie(self::COOKIE, '', [
+			setcookie($name, '', [
 				'expires' => time() - 3600,
 				'path' => '/',
 				'httponly' => true,
@@ -65,16 +99,16 @@ class Auth
 		}
 	}
 
-	private static function writeCookie(string $ownerId, int $expires): void
+	private static function writeCookie(string $name, string $ownerId, int $expires): void
 	{
 		$value = self::sign($ownerId, $expires);
-		$cookie = new Cookie(self::COOKIE, $value, $expires);
+		$cookie = new Cookie($name, $value, $expires);
 		$cookie->setHttpOnly(true);
 		$cookie->setPath('/');
 		Application::getInstance()->getContext()->getResponse()->addCookie($cookie);
 		if (!headers_sent())
 		{
-			setcookie(self::COOKIE, $value, [
+			setcookie($name, $value, [
 				'expires' => $expires,
 				'path' => '/',
 				'httponly' => true,
@@ -83,9 +117,9 @@ class Auth
 		}
 	}
 
-	private static function readCookie(): ?array
+	private static function readCookie(string $name = self::COOKIE): ?array
 	{
-		$raw = (string)($_COOKIE[self::COOKIE] ?? '');
+		$raw = (string)($_COOKIE[$name] ?? '');
 		if ($raw === '')
 		{
 			return null;

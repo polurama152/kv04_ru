@@ -95,6 +95,22 @@ if (!function_exists('kv04DiaryRenderItems'))
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-logout>Выйти</button>
 	</div>
 
+<?php if (!empty($arResult['NEEDS_EMAIL'])): ?>
+	<div class="kv04-attach-email" data-attach-email>
+		<p class="kv04-attach-email__text">
+			Привяжите почту — она станет именем дневника.
+			Пока её нет, дневник открывается одним пином, а такой пин может
+			случайно подойти постороннему.
+		</p>
+		<div class="kv04-attach-email__row">
+			<input type="email" class="kv04-input" autocomplete="email" inputmode="email"
+				spellcheck="false" data-attach-input placeholder="you@example.com" aria-label="Почта">
+			<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-attach-save>Привязать</button>
+		</div>
+		<p class="kv04-attach-email__status" data-attach-status hidden></p>
+	</div>
+<?php endif; ?>
+
 	<form class="kv04-composer" data-composer>
 		<textarea name="text" rows="4" placeholder="Что у вас на уме? Можно код и файлы."></textarea>
 		<div class="kv04-composer__bar">
@@ -690,6 +706,38 @@ if (!function_exists('kv04DiaryRenderItems'))
 		e.preventDefault();
 		setPendingFiles(files, true);
 	});
+
+	var attachBox = root.querySelector('[data-attach-email]');
+	if (attachBox) {
+		var attachInput = attachBox.querySelector('[data-attach-input]');
+		var attachSave = attachBox.querySelector('[data-attach-save]');
+		var attachStatus = attachBox.querySelector('[data-attach-status]');
+		var setAttachStatus = function (msg, isError) {
+			attachStatus.hidden = !msg;
+			attachStatus.textContent = msg || '';
+			attachStatus.classList.toggle('is-error', !!isError);
+		};
+		var submitAttach = function () {
+			var value = (attachInput.value || '').trim();
+			if (!value) { setAttachStatus('Введите почту', true); attachInput.focus(); return; }
+			attachSave.disabled = true;
+			setAttachStatus('Сохраняю…', false);
+			post({ action: 'attach_email', email: value }).then(function (data) {
+				attachSave.disabled = false;
+				if (!data.ok) { setAttachStatus(data.error || 'Ошибка', true); return; }
+				setAttachStatus('Готово — почта привязана', false);
+				attachBox.classList.add('is-done');
+				setTimeout(function () { attachBox.remove(); }, 1500);
+			}).catch(function () {
+				attachSave.disabled = false;
+				setAttachStatus('Нет связи', true);
+			});
+		};
+		attachSave.addEventListener('click', submitAttach);
+		attachInput.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter') { e.preventDefault(); submitAttach(); }
+		});
+	}
 
 	highlight();
 

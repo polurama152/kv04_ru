@@ -23,9 +23,9 @@ class Installer
 	/**
 	 * Версия схемы данных. Поднимать при изменении структуры HL, инфоблока или
 	 * своих таблиц — это заставит ensure() один раз переприменить схему на
-	 * каждом сервере. 2: добавлена таблица попыток входа.
+	 * каждом сервере. 2: таблица попыток входа. 3: UF_EMAIL.
 	 */
-	private const SCHEMA_VERSION = '2';
+	private const SCHEMA_VERSION = '3';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -161,6 +161,12 @@ class Installer
 		$entityId = HighloadBlockTable::compileEntityId($hlId);
 		self::ensureUserField($entityId, 'UF_PIN_HASH', 'string', ['SIZE' => 64, 'ROWS' => 1]);
 		self::ensureUserField($entityId, 'UF_OWNER_ID', 'string', ['SIZE' => 40, 'ROWS' => 1]);
+		// Идентичность. Хранится приведённой к нижнему регистру: по ней идёт
+		// поиск, а HL не даёт ни индексов, ни регистронезависимого сравнения
+		// на уровне схемы.
+		self::ensureUserField($entityId, 'UF_EMAIL', 'string', ['SIZE' => 180, 'ROWS' => 1]);
+		// Осталось от прежней модели «пин = идентификатор»: счётчики теперь
+		// в kv04_diary_attempts. Поля не удаляем — снос UF роняет колонку.
 		self::ensureUserField($entityId, 'UF_FAILS', 'integer', []);
 		self::ensureUserField($entityId, 'UF_LOCKED_UNTIL', 'integer', []);
 

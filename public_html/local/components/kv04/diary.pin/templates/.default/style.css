@@ -131,3 +131,43 @@
 		margin-top: 1.5rem;
 	}
 }
+
+/* Почта — идентичность дневника. Спрашиваем только на новом устройстве
+   и при создании; на знакомом браузере поле скрыто. */
+.kv04-pin__email {
+	margin-bottom: 1.25rem;
+	text-align: left;
+}
+
+.kv04-pin__email label {
+	display: block;
+	margin-bottom: 0.5rem;
+	color: var(--kv04-text-muted);
+	font-size: 0.9rem;
+}
+
+.kv04-pin__email input {
+	width: 100%;
+	box-sizing: border-box;
+	text-align: center;
+	font-size: 1rem;
+}
+
+.kv04-pin__forget {
+	display: block;
+	margin: 1.25rem auto 0;
+	padding: 0.25rem 0.5rem;
+	border: 0;
+	background: none;
+	color: var(--kv04-text-muted);
+	font: inherit;
+	font-size: 0.85rem;
+	text-decoration: underline;
+	text-underline-offset: 0.2em;
+	cursor: pointer;
+}
+
+.kv04-pin__forget:hover,
+.kv04-pin__forget:focus-visible {
+	color: var(--kv04-accent);
+}
