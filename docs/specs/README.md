@@ -15,6 +15,7 @@
 | № | Файл | Статус | Суть |
 |---|------|--------|------|
 | 0001 | [0001-homepage-private-diary.md](0001-homepage-private-diary.md) | done | Главная: личный дневник по PIN вместо витрины |
+| 0002 | [0002-perf-and-hardening.md](0002-perf-and-hardening.md) | in-progress | Версионирование, быстрый путь `Installer::ensure()`, реестр долга по скорости и безопасности |
 
 Архитектура и карта файлов — [docs/ONBOARDING.md](../ONBOARDING.md). UX и POST-контракт — в спеке `0001`.
 
