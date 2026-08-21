@@ -331,14 +331,60 @@ if (!function_exists('kv04DiaryRenderItems'))
 		return body;
 	}
 
+	// Разметка должна совпадать с kv04DiaryRenderItems() в этом же файле:
+	// одна и та же заметка приходит либо с сервера при загрузке страницы,
+	// либо отсюда после сохранения.
+	function createNoteElement(item) {
+		var note = document.createElement('article');
+		note.className = 'kv04-note';
+		note.setAttribute('data-id', String(item.id));
+
+		if (item.text) {
+			var body = document.createElement('div');
+			body.className = 'kv04-note__body';
+			body.innerHTML = item.text;
+			note.appendChild(body);
+		}
+
+		var footer = document.createElement('div');
+		footer.className = 'kv04-note__footer';
+		var time = document.createElement('time');
+		time.textContent = item.date || '';
+		footer.appendChild(time);
+
+		var ops = document.createElement('div');
+		ops.className = 'kv04-note__ops';
+		ops.innerHTML =
+			'<button type="button" class="kv04-btn kv04-btn--ghost kv04-btn--sm" data-edit>Изменить</button>' +
+			'<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-delete>Удалить</button>';
+		footer.appendChild(ops);
+		note.appendChild(footer);
+
+		// renderNoteMedia ищет .kv04-note__footer, поэтому только после append.
+		renderNoteMedia(note, item.media || []);
+
+		return note;
+	}
+
 	function submitComposer() {
 		setError('');
+		if (composerSubmit) composerSubmit.disabled = true;
 		post(buildComposerFormData(), true).then(function (data) {
+			if (composerSubmit) composerSubmit.disabled = false;
 			if (!data.ok) { setError(data.error || 'Ошибка'); return; }
 			textarea.value = '';
 			clearComposerFiles();
-			location.reload();
-		}).catch(function () { setError('Нет связи'); });
+			// Раньше здесь был location.reload(): полный проход по стеку
+			// ради одной новой заметки. Сервер уже вернул готовый элемент.
+			if (data.item) {
+				var note = createNoteElement(data.item);
+				list.insertBefore(note, list.firstChild);
+				highlight(note);
+			}
+		}).catch(function () {
+			if (composerSubmit) composerSubmit.disabled = false;
+			setError('Нет связи');
+		});
 	}
 
 	composer.addEventListener('submit', function (e) {
@@ -399,15 +445,15 @@ if (!function_exists('kv04DiaryRenderItems'))
 		});
 	}
 
-	function cancelEdit(note, originalHtml, hadBody) {
+	function closeEdit(note, html, hasBody) {
 		var area = note.querySelector('.kv04-textarea');
 		if (!area) return;
 		var bar = note.querySelector('.kv04-edit-bar');
 		if (bar) bar.remove();
-		if (hadBody || originalHtml) {
+		if (hasBody || html) {
 			var body = document.createElement('div');
 			body.className = 'kv04-note__body';
-			body.innerHTML = originalHtml;
+			body.innerHTML = html;
 			area.replaceWith(body);
 			highlight(body);
 		} else {
@@ -424,7 +470,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 			if (save) {
 				ctx.doSave();
 			} else {
-				cancelEdit(note, ctx.originalHtml, ctx.hadBody);
+				closeEdit(note, ctx.originalHtml, ctx.hadBody);
 			}
 		});
 	}
@@ -574,9 +620,17 @@ if (!function_exists('kv04DiaryRenderItems'))
 		var attachInput = bar.querySelector('input[type=file]');
 		save.title = 'Готово (' + saveShortcutLabel + ')';
 		function doSave() {
+			save.disabled = true;
 			post({ action: 'edit', id: id, text: area.value }).then(function (data) {
+				save.disabled = false;
 				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
-				location.reload();
+				// Сервер вернул санитизированный HTML — ставим его вместо
+				// textarea. Раньше здесь была перезагрузка всей страницы.
+				var html = typeof data.text === 'string' ? data.text : area.value;
+				closeEdit(note, html, html !== '');
+			}).catch(function () {
+				save.disabled = false;
+				alert('Нет связи');
 			});
 		}
 		note._editCtx = { originalHtml: current, hadBody: hadBody, doSave: doSave };
@@ -639,11 +693,28 @@ if (!function_exists('kv04DiaryRenderItems'))
 
 	highlight();
 
+	// Подсвечиваем только добавленные узлы. Пока заметки появлялись через
+	// перезагрузку страницы, наблюдатель почти не срабатывал; теперь они
+	// добавляются динамически, и highlight(list) на каждой вставке
+	// перекрашивал бы всю ленту.
 	if (window.MutationObserver && list) {
 		var highlightTimer = null;
-		var observer = new MutationObserver(function () {
+		var pendingNodes = [];
+		var observer = new MutationObserver(function (mutations) {
+			mutations.forEach(function (mutation) {
+				Array.prototype.forEach.call(mutation.addedNodes, function (node) {
+					if (node.nodeType === 1) pendingNodes.push(node);
+				});
+			});
+			if (!pendingNodes.length) return;
 			if (highlightTimer) clearTimeout(highlightTimer);
-			highlightTimer = setTimeout(function () { highlight(list); }, 50);
+			highlightTimer = setTimeout(function () {
+				var nodes = pendingNodes;
+				pendingNodes = [];
+				nodes.forEach(function (node) {
+					if (node.isConnected) highlight(node);
+				});
+			}, 50);
 		});
 		observer.observe(list, { childList: true });
 	}

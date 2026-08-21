@@ -53,10 +53,8 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		{
 			$files = $this->normalizeFiles($_FILES['media'] ?? []);
 			$result = NoteService::add($ownerId, (string)$this->request->getPost('text'), $files);
-			if (!empty($result['ok']))
-			{
-				$result['items'] = NoteService::list($ownerId);
-			}
+			// Перечитывать всю ленту не нужно: add() уже вернул готовый
+			// элемент, фронт дорисовывает его сам.
 			$this->json($result);
 			return;
 		}
