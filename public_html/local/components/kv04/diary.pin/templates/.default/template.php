@@ -44,7 +44,6 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	<p class="kv04-pin__error" data-error hidden></p>
 
 	<div class="kv04-pin__actions">
-		<button type="button" class="kv04-btn kv04-btn--primary" data-login>Войти</button>
 		<button type="button" class="kv04-btn kv04-btn--ghost" data-create>Создать дневник</button>
 	</div>
 <?php if ($arResult['BOUND']): ?>
@@ -66,6 +65,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	var forgetBtn = root.querySelector('[data-forget]');
 	var needsEmail = root.getAttribute('data-needs-email') === '1';
 	var creating = false;
+	var sending = false;
 
 	function renderDots() {
 		var v = pinInput.value;
@@ -81,6 +81,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		if (pinInput.value.length < 4) {
 			pinInput.value += d;
 			renderDots();
+			maybeSubmit(false);
 		}
 	}
 	function clearPin() {
@@ -91,12 +92,52 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		pinInput.value = pinInput.value.slice(0, -1);
 		renderDots();
 	}
-	function handleEnter() {
-		if (creating) {
-			send('create');
-		} else {
-			send('login');
+	function emailFilled() {
+		return !emailInput || emailInput.value.trim() !== '';
+	}
+
+	/**
+	 * Кнопки «Войти» нет: набранный пин и есть действие. Вызывается после
+	 * каждой цифры, поэтому молча выходит, пока вводить ещё нечего.
+	 * explicit = запрос пришёл от Enter, тогда объясняем, чего не хватает.
+	 */
+	function maybeSubmit(explicit) {
+		if (sending) return;
+
+		// Порядок важен: сначала пин, потом всё остальное. Проверять почту
+		// раньше нельзя — метод зовётся на каждую цифру, и фокус уезжал бы
+		// из пин-поля уже на первой.
+		if (pinInput.value.length < 4) {
+			if (explicit) setError('Введите 4 цифры');
+			return;
 		}
+
+		if (creating) {
+			if (confirmInput.value.length < 4) {
+				if (explicit) setError('Повторите пин');
+				confirmInput.focus();
+				return;
+			}
+			if (!emailFilled()) {
+				setError('Укажите почту');
+				if (emailInput) emailInput.focus();
+				return;
+			}
+			send('create');
+			return;
+		}
+
+		if (needsEmail && !emailFilled()) {
+			setError('Сначала укажите почту');
+			if (emailInput) emailInput.focus();
+			return;
+		}
+
+		send('login');
+	}
+
+	function handleEnter() {
+		maybeSubmit(true);
 	}
 	function handleEscape() {
 		if (!error.hidden && error.textContent) {
@@ -114,6 +155,8 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		);
 	}
 	function send(action) {
+		if (sending) return;
+		sending = true;
 		setError('');
 		var body = new FormData();
 		body.append('sessid', '<?=CUtil::JSEscape($arResult['SESSID'])?>');
@@ -133,16 +176,40 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 					location.reload();
 					return;
 				}
+				sending = false;
 				setError(data.error || 'Ошибка');
+				// Отправка идёт сама, поэтому после отказа освобождаем поле —
+				// иначе следующая цифра просто не влезет в уже полный пин.
+				failReset();
 			})
-			.catch(function () { setError('Нет связи'); });
+			.catch(function () {
+				sending = false;
+				setError('Нет связи');
+				failReset();
+			});
+	}
+
+	function failReset() {
+		clearPin();
+		if (creating) {
+			confirmInput.value = '';
+		}
+		pinInput.focus();
 	}
 	root.querySelector('[data-pad]').addEventListener('click', function (e) {
 		var btn = e.target.closest('button');
 		if (!btn) return;
 		if (btn.dataset.digit != null) {
+			var before = document.activeElement;
 			appendDigit(btn.dataset.digit);
-		} else if (btn.dataset.action === 'clear') {
+			// Последняя цифра могла увести фокус — на подтверждение или на
+			// почту. Отбирать его обратно в скрытый пин нельзя.
+			if (document.activeElement === before) {
+				pinInput.focus();
+			}
+			return;
+		}
+		if (btn.dataset.action === 'clear') {
 			clearPin();
 		} else if (btn.dataset.action === 'del') {
 			deleteDigit();
@@ -152,7 +219,6 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	root.querySelector('[data-dots]').addEventListener('click', function () {
 		pinInput.focus();
 	});
-	root.querySelector('[data-login]').addEventListener('click', function () { send('login'); });
 	root.querySelector('[data-create]').addEventListener('click', function () {
 		if (!creating) {
 			creating = true;
@@ -172,7 +238,24 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	pinInput.addEventListener('input', function () {
 		pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 4);
 		renderDots();
+		maybeSubmit(false);
 	});
+	confirmInput.addEventListener('input', function () {
+		confirmInput.value = confirmInput.value.replace(/\D/g, '').slice(0, 4);
+		maybeSubmit(false);
+	});
+	if (emailInput) {
+		emailInput.addEventListener('keydown', function (e) {
+			if (e.key !== 'Enter') return;
+			e.preventDefault();
+			// С почтой разобрались — дальше пин.
+			if (pinInput.value.length < 4) {
+				pinInput.focus();
+				return;
+			}
+			maybeSubmit(true);
+		});
+	}
 	document.addEventListener('keydown', function (e) {
 		if (isEditableTarget(e.target)) return;
 		if (e.key >= '0' && e.key <= '9') {
@@ -196,6 +279,10 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		}
 	});
 	renderDots();
-	pinInput.focus();
+	if (needsEmail && emailInput) {
+		emailInput.focus();
+	} else {
+		pinInput.focus();
+	}
 })();
 </script>
