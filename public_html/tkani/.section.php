@@ -1,0 +1,6 @@
+<?
+$sSectionName = "Ткани";
+$arDirProperties = Array(
+
+);
+?>

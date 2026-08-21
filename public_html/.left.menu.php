@@ -1,0 +1,95 @@
+<?
+$aMenuLinks = Array(
+	Array(
+		"Скидки", 
+		"/skidki.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"ЧПУ", 
+		"/chpu/", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Новая страница", 
+		"/novaya-stranitsa.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Мода", 
+		"/moda/", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Модные дома", 
+		"/modnye-doma/", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Книги", 
+		"/books/", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Карта сайта", 
+		"/karta-sayta.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Cyberpunk", 
+		"/cyberpunk/", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Ткани", 
+		"/tkani/", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Время работы магазина", 
+		"/vremya-raboty-magazina.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Для видео", 
+		"/dlya-video.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Страница новостей", 
+		"/stranitsa-novostey.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Курс валют", 
+		"/currency_curse.php", 
+		Array(), 
+		Array(), 
+		"" 
+	)
+);
+?>

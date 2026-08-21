@@ -1,0 +1,6 @@
+<?
+$sSectionName = "Мода";
+$arDirProperties = Array(
+
+);
+?>

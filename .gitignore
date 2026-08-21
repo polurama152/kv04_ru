@@ -1,0 +1,33 @@
+# --- Ядро Bitrix: 5.7 ГБ, обновляется маркетплейсом, править запрещено ---
+/public_html/bitrix/
+
+# --- Секреты: пароли БД и ключи шифрования ---
+/public_html/.settings.php
+/public_html/bitrix/.settings.php
+/public_html/bitrix/php_interface/dbconn.php
+**/dbconn.php
+**/.settings.php
+**/.settings_extra.php
+
+# --- Пользовательские загрузки и дампы ---
+/public_html/upload/
+/public_html/bitrixsetup.php
+/public_html/bitrixsetup.update
+*.sql
+*.tar.gz
+*.enc
+
+# --- Служебное окружение ---
+/.idea/
+/.serena/cache/
+/.vscode/
+
+# --- Мусор ОС и редакторов ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*~
+
+# --- Наследие прежнего хостинга (Spaceweb): 28 МБ бинарников PHP CGI ---
+/public_html/cgi-bin/

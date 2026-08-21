@@ -1,0 +1,55 @@
+{
+  "mcpServers": {
+    "serena": {
+      "type": "stdio",
+      "command": "C:\\Users\\v\\.local\\bin\\serena-mcp-server.exe",
+      "args": [
+        "--context",
+        "ide",
+        "--project",
+        "D:\\kv04_ru"
+      ],
+      "alwaysAllow": [
+        "check_onboarding_performed",
+        "delete_memory",
+        "edit_memory",
+        "find_file",
+        "find_referencing_symbols",
+        "find_symbol",
+        "get_symbols_overview",
+        "initial_instructions",
+        "insert_after_symbol",
+        "insert_before_symbol",
+        "list_dir",
+        "list_memories",
+        "onboarding",
+        "read_memory",
+        "rename_symbol",
+        "replace_content",
+        "replace_symbol_body",
+        "search_for_pattern",
+        "write_memory",
+        "create_text_file",
+        "delete_lines",
+        "insert_at_line",
+        "read_file",
+        "replace_lines",
+        "summarize_changes"
+      ],
+      "disabled": false
+    },
+    "bitrix": {
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "C:\\Users\\v\\.local\\node-v24.14.0-win-x64\\npx.cmd",
+        "-y",
+        "mcp-remote",
+        "https://bxmcp.camouf.ru"
+      ]
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp"
+    }
+  }
+}

@@ -1,0 +1,133 @@
+.kv04-pin {
+	position: relative;
+	max-width: min(360px, 100%);
+	width: 100%;
+	margin: clamp(2rem, 8vw, 3rem) auto 2rem;
+	text-align: center;
+	padding: 0 0.5rem;
+}
+
+.kv04-pin__title {
+	margin: 0 0 0.35rem;
+	font-size: clamp(1.35rem, 5vw, 1.65rem);
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+
+.kv04-pin__hint {
+	margin: 0 0 2rem;
+	color: var(--kv04-text-muted);
+	font-size: 0.95rem;
+}
+
+.kv04-pin__dots {
+	display: flex;
+	justify-content: center;
+	gap: 1.25rem;
+	margin-bottom: 2rem;
+	cursor: text;
+}
+
+.kv04-pin__dots span {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	border: 2px solid var(--kv04-accent);
+	display: inline-block;
+	transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.kv04-pin__dots span.is-filled {
+	background: var(--kv04-accent);
+	transform: scale(1.05);
+}
+
+.kv04-pin__hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+	opacity: 0;
+}
+
+.kv04-pin__pad {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: clamp(0.5rem, 2vw, 0.75rem);
+	margin-bottom: 1.5rem;
+	max-width: min(280px, 100%);
+	width: 100%;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+.kv04-pin__pad button {
+	height: clamp(56px, 18vw, 72px);
+	min-height: var(--kv04-touch-min);
+	border: none;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--kv04-text);
+	font-size: clamp(1.45rem, 5vw, 1.75rem);
+	font-weight: 400;
+	cursor: pointer;
+	transition: background 0.12s ease;
+}
+
+.kv04-pin__pad button:hover {
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.kv04-pin__pad button:active {
+	background: rgba(42, 171, 238, 0.18);
+}
+
+.kv04-pin__confirm {
+	margin-bottom: 1rem;
+}
+
+.kv04-pin__confirm label {
+	display: block;
+	margin-bottom: 0.5rem;
+	color: var(--kv04-text-muted);
+	font-size: 0.9rem;
+}
+
+.kv04-pin__confirm input {
+	width: 8rem;
+	margin: 0 auto;
+	text-align: center;
+	letter-spacing: 0.45rem;
+	font-size: 1.2rem;
+}
+
+.kv04-pin__error {
+	margin: 0 0 1rem;
+	min-height: 1.4em;
+	color: var(--kv04-danger);
+	font-size: 0.9rem;
+}
+
+.kv04-pin__actions {
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+	align-items: center;
+}
+
+.kv04-pin__actions .kv04-btn {
+	min-width: min(200px, 100%);
+	width: 100%;
+	max-width: 280px;
+}
+
+@media (max-width: 480px) {
+	.kv04-pin {
+		margin-top: 1.5rem;
+	}
+}

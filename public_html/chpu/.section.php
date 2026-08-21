@@ -1,0 +1,6 @@
+<?
+$sSectionName = "ЧПУ";
+$arDirProperties = Array(
+
+);
+?>

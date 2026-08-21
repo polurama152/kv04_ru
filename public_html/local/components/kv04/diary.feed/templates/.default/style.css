@@ -1,0 +1,758 @@
+.kv04-feed {
+	margin: 0 auto 2rem;
+	width: 100%;
+}
+
+.kv04-feed__head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: clamp(0.5rem, 2vw, 1rem);
+	margin-bottom: 1.25rem;
+	padding-bottom: 0.75rem;
+	border-bottom: 1px solid var(--kv04-border);
+	flex-wrap: wrap;
+}
+
+.kv04-feed__head h1 {
+	margin: 0;
+	font-size: clamp(1.2rem, 4vw, 1.45rem);
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+
+.kv04-composer {
+	background: var(--kv04-card);
+	border-radius: var(--kv04-radius-lg);
+	padding: clamp(0.75rem, 2.5vw, 1rem);
+	margin-bottom: 1.5rem;
+	box-shadow: var(--kv04-shadow);
+}
+
+.kv04-composer textarea {
+	width: 100%;
+	background: transparent;
+	border: none;
+	resize: vertical;
+	outline: none;
+	font-size: clamp(0.95rem, 2.5vw, 1rem);
+	color: var(--kv04-text);
+	min-height: 4.5rem;
+	padding: 0;
+}
+
+.kv04-composer textarea::placeholder {
+	color: var(--kv04-text-muted);
+}
+
+.kv04-composer__bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin-top: 0.75rem;
+	padding-top: 0.75rem;
+	border-top: 1px solid var(--kv04-border);
+}
+
+.kv04-composer__bar .kv04-btn--primary {
+	margin-left: auto;
+}
+
+.kv04-composer__preview {
+	margin-top: 0.5rem;
+}
+
+.kv04-composer__preview-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+}
+
+.kv04-composer__preview-item {
+	position: relative;
+	width: 72px;
+	height: 72px;
+	border-radius: 8px;
+	overflow: hidden;
+	background: rgba(0, 0, 0, 0.15);
+	flex-shrink: 0;
+}
+
+.kv04-composer__preview-item img,
+.kv04-composer__preview-item video {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.kv04-composer__preview-badge {
+	position: absolute;
+	left: 4px;
+	bottom: 4px;
+	padding: 0.1rem 0.3rem;
+	border-radius: 4px;
+	background: rgba(0, 0, 0, 0.62);
+	color: #fff;
+	font-size: 0.65rem;
+	line-height: 1.2;
+	pointer-events: none;
+}
+
+.kv04-composer__preview-name {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	padding: 0.25rem;
+	box-sizing: border-box;
+	font-size: 0.65rem;
+	line-height: 1.2;
+	text-align: center;
+	color: var(--kv04-text-muted);
+	word-break: break-word;
+}
+
+.kv04-composer__preview-remove {
+	position: absolute;
+	top: 2px;
+	right: 2px;
+	z-index: 1;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.62);
+	color: #fff;
+	font-size: 0.95rem;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.kv04-composer__preview-remove:hover {
+	background: rgba(229, 57, 53, 0.92);
+}
+
+.kv04-feed__error {
+	color: var(--kv04-danger);
+	margin: 0.5rem 0 0;
+	font-size: 0.9rem;
+}
+
+.kv04-feed__list {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 0.45rem;
+}
+
+.kv04-note {
+	width: fit-content;
+	max-width: min(88%, clamp(360px, 55vw, 680px));
+	background: var(--kv04-bubble-out);
+	border-radius: var(--kv04-bubble-radius);
+	padding: 0.45rem 0.65rem 0.35rem;
+	box-shadow: none;
+	position: relative;
+	overflow: hidden;
+}
+
+.kv04-note:not(.is-editing) {
+	cursor: pointer;
+}
+
+.kv04-note:not(.is-editing) .kv04-note__media,
+.kv04-note:not(.is-editing) .kv04-note__ops,
+.kv04-note:not(.is-editing) .kv04-media-thumb,
+.kv04-note:not(.is-editing) .kv04-media-item__remove {
+	cursor: default;
+}
+
+.kv04-note__body {
+	font-size: clamp(0.92rem, 2.5vw, 0.98rem);
+	line-height: 1.5;
+	word-wrap: break-word;
+	overflow-wrap: anywhere;
+}
+
+.kv04-note__body:empty {
+	display: none;
+}
+
+.kv04-note__body p {
+	margin: 0 0 0.45rem;
+}
+
+.kv04-note__body p:last-child {
+	margin-bottom: 0;
+}
+
+.kv04-note__body pre {
+	background: #282c34;
+	padding: 0.65rem 0.75rem;
+	border-radius: calc(var(--kv04-radius) - 2px);
+	overflow-x: auto;
+	overflow-y: hidden;
+	margin: 0.35rem 0 0;
+	border: none;
+	max-width: 100%;
+	-webkit-overflow-scrolling: touch;
+}
+
+.kv04-note__body pre:first-child {
+	margin-top: 0;
+}
+
+.kv04-note__body code {
+	font-family: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+	font-size: 0.88em;
+}
+
+.kv04-note__body pre code,
+.kv04-note__body pre code.hljs {
+	display: block;
+	background: transparent;
+	padding: 0;
+	border: none;
+	white-space: pre;
+	word-wrap: normal;
+	overflow-wrap: normal;
+}
+
+.kv04-note__body pre.hljs {
+	background: #282c34;
+}
+
+.kv04-note__media {
+	margin-top: 0.35rem;
+}
+
+.kv04-note__media:first-child {
+	margin-top: 0;
+}
+
+.kv04-note__footer {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 0.2rem;
+	padding-top: 0.15rem;
+}
+
+.kv04-note__footer time {
+	color: var(--kv04-text-muted);
+	font-size: 0.72rem;
+	line-height: 1.2;
+	opacity: 0.85;
+	white-space: nowrap;
+}
+
+.kv04-note__ops {
+	display: flex;
+	gap: 0.15rem;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.kv04-note:hover .kv04-note__ops,
+.kv04-note:focus-within .kv04-note__ops {
+	opacity: 1;
+}
+
+.kv04-note__ops .kv04-btn {
+	padding: 0.2rem 0.45rem;
+	font-size: 0.75rem;
+	min-height: auto;
+	border-radius: 6px;
+}
+
+/* --- Media album grid (Telegram-like) --- */
+
+.kv04-media-grid {
+	display: grid;
+	gap: 2px;
+	border-radius: 10px;
+	overflow: hidden;
+	max-width: 100%;
+}
+
+.kv04-media-grid--1 {
+	width: min(100%, 260px);
+	grid-template-columns: 1fr;
+}
+
+.kv04-media-grid--2 {
+	width: min(100%, 300px);
+	grid-template-columns: repeat(2, 1fr);
+}
+
+.kv04-media-grid--3 {
+	width: min(100%, 300px);
+	grid-template-columns: 1.2fr 0.8fr;
+	grid-template-rows: repeat(2, 1fr);
+}
+
+.kv04-media-grid--3 .kv04-media-item:first-child {
+	grid-row: span 2;
+}
+
+.kv04-media-grid--4,
+.kv04-media-grid--more {
+	width: min(100%, 300px);
+	grid-template-columns: repeat(2, 1fr);
+	grid-template-rows: repeat(2, 1fr);
+}
+
+.kv04-media-thumb {
+	position: relative;
+	display: block;
+	width: 100%;
+	aspect-ratio: 1;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	overflow: hidden;
+	cursor: pointer;
+	background: rgba(0, 0, 0, 0.2);
+	transition: filter 0.15s ease;
+}
+
+.kv04-note.is-editing {
+	cursor: default;
+}
+
+.kv04-media-grid--1 .kv04-media-thumb {
+	aspect-ratio: 4 / 3;
+}
+
+.kv04-media-thumb:hover {
+	filter: brightness(1.08);
+}
+
+.kv04-media-thumb:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 1px;
+	z-index: 1;
+}
+
+.kv04-media-thumb img,
+.kv04-media-thumb video {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	pointer-events: none;
+}
+
+.kv04-media-thumb--video .kv04-media-thumb__play {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.28);
+	pointer-events: none;
+}
+
+.kv04-media-thumb--video .kv04-media-thumb__play::after {
+	content: "";
+	width: 0;
+	height: 0;
+	border-style: solid;
+	border-width: 8px 0 8px 13px;
+	border-color: transparent transparent transparent #fff;
+	margin-left: 3px;
+	filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+.kv04-media-thumb__count {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	font-size: 1.35rem;
+	font-weight: 600;
+	pointer-events: none;
+}
+
+.kv04-media-item {
+	position: relative;
+	min-width: 0;
+}
+
+.kv04-media-item__remove {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	z-index: 2;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.62);
+	color: #fff;
+	font-size: 1.1rem;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s ease, background 0.15s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.kv04-media-item__remove:hover {
+	background: rgba(229, 57, 53, 0.92);
+}
+
+.kv04-media-item__remove:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 1px;
+	opacity: 1;
+}
+
+.kv04-note:hover .kv04-media-item__remove,
+.kv04-note:focus-within .kv04-media-item__remove,
+.kv04-note.is-editing .kv04-media-item__remove {
+	opacity: 1;
+}
+
+/* --- Fullscreen lightbox --- */
+
+.kv04-lightbox {
+	position: fixed;
+	inset: 0;
+	z-index: 100000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.22s ease, visibility 0.22s ease;
+}
+
+.kv04-lightbox.is-open {
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+}
+
+.kv04-lightbox__backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.9);
+	cursor: pointer;
+}
+
+.kv04-lightbox__close {
+	position: fixed;
+	top: max(12px, env(safe-area-inset-top, 0px));
+	right: max(12px, env(safe-area-inset-right, 0px));
+	z-index: 100002;
+	width: 44px;
+	height: 44px;
+	border: none;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.12);
+	color: #fff;
+	font-size: 1.85rem;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.kv04-lightbox__close:hover {
+	background: rgba(255, 255, 255, 0.22);
+}
+
+.kv04-lightbox__close:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 2px;
+}
+
+.kv04-lightbox__stage {
+	position: relative;
+	z-index: 100001;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	padding: max(56px, calc(env(safe-area-inset-top, 0px) + 44px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+	box-sizing: border-box;
+	pointer-events: none;
+}
+
+.kv04-lightbox__stage img,
+.kv04-lightbox__stage video {
+	display: block;
+	max-width: 100%;
+	max-height: 100%;
+	width: auto;
+	height: auto;
+	object-fit: contain;
+	border-radius: 4px;
+	pointer-events: auto;
+	animation: kv04-lightbox-in 0.22s ease;
+}
+
+@keyframes kv04-lightbox-in {
+	from {
+		opacity: 0;
+		transform: scale(0.96);
+	}
+
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+body.kv04-lightbox-open {
+	overflow: hidden;
+}
+
+/* --- Save confirm dialog --- */
+
+.kv04-confirm {
+	position: fixed;
+	inset: 0;
+	z-index: 100010;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.18s ease, visibility 0.18s ease;
+}
+
+.kv04-confirm.is-open {
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+}
+
+.kv04-confirm__backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.55);
+}
+
+.kv04-confirm__box {
+	position: relative;
+	z-index: 1;
+	width: min(100%, 320px);
+	background: var(--kv04-card);
+	border-radius: var(--kv04-radius-lg);
+	padding: 1.15rem 1.25rem 1rem;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+	animation: kv04-confirm-in 0.18s ease;
+}
+
+@keyframes kv04-confirm-in {
+	from {
+		opacity: 0;
+		transform: scale(0.96) translateY(4px);
+	}
+
+	to {
+		opacity: 1;
+		transform: scale(1) translateY(0);
+	}
+}
+
+.kv04-confirm__title {
+	margin: 0 0 1rem;
+	font-size: 1rem;
+	font-weight: 500;
+	text-align: center;
+	color: var(--kv04-text);
+}
+
+.kv04-confirm__actions {
+	display: flex;
+	justify-content: center;
+	gap: 0.5rem;
+}
+
+.kv04-confirm__actions .kv04-btn {
+	min-width: 5.5rem;
+}
+
+.kv04-confirm__actions .kv04-btn:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 2px;
+	box-shadow: 0 0 0 3px rgba(82, 136, 193, 0.25);
+}
+
+.kv04-note .kv04-textarea {
+	margin-top: 0.35rem;
+}
+
+.kv04-edit-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	margin-top: 0.5rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--kv04-border);
+}
+
+.kv04-edit-bar .kv04-btn--primary {
+	margin-left: auto;
+}
+
+.kv04-edit-bar.is-uploading .kv04-btn--attach {
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.kv04-btn--attach {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	cursor: pointer;
+	min-height: var(--kv04-touch-min, 36px);
+	padding: 0.35rem 0.65rem;
+	background: transparent;
+	border: none;
+	border-radius: var(--kv04-radius, 8px);
+	color: var(--kv04-text-muted);
+	font-size: 0.85rem;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.kv04-btn--attach:hover {
+	color: var(--kv04-text);
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.kv04-btn--attach:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 2px;
+}
+
+.kv04-icon-clip {
+	flex-shrink: 0;
+	opacity: 0.85;
+}
+
+.kv04-edit-bar__status {
+	flex: 1 1 100%;
+	font-size: 0.82rem;
+	color: var(--kv04-text-muted);
+	min-height: 1.1em;
+	word-break: break-word;
+}
+
+.kv04-edit-bar__status.is-error {
+	color: var(--kv04-danger);
+}
+
+.kv04-note .kv04-btn {
+	margin-top: 0;
+}
+
+@media (min-width: 768px) {
+	.kv04-media-grid--1 {
+		width: min(100%, 380px);
+	}
+
+	.kv04-media-grid--2 {
+		width: min(100%, 440px);
+	}
+
+	.kv04-media-grid--3,
+	.kv04-media-grid--4,
+	.kv04-media-grid--more {
+		width: min(100%, 440px);
+	}
+}
+
+@media (min-width: 1024px) {
+	.kv04-note {
+		max-width: min(85%, 720px);
+	}
+
+	.kv04-media-grid--1 {
+		width: min(100%, 420px);
+	}
+
+	.kv04-media-grid--2 {
+		width: min(100%, 520px);
+	}
+
+	.kv04-media-grid--3,
+	.kv04-media-grid--4,
+	.kv04-media-grid--more {
+		width: min(100%, 520px);
+	}
+}
+
+@media (max-width: 640px) {
+	.kv04-composer__bar .kv04-btn {
+		min-height: var(--kv04-touch-min);
+	}
+
+	.kv04-composer__bar .kv04-btn--primary {
+		margin-left: 0;
+		flex: 1 1 100%;
+	}
+
+	.kv04-edit-bar .kv04-btn--primary {
+		margin-left: 0;
+		flex: 1 1 100%;
+	}
+
+	.kv04-btn--attach .kv04-btn__label {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		border: 0;
+	}
+
+	.kv04-note {
+		max-width: min(92%, 360px);
+	}
+
+	.kv04-note__ops {
+		opacity: 1;
+	}
+
+	.kv04-media-grid--1 {
+		width: min(100%, 240px);
+	}
+
+	.kv04-media-grid--2,
+	.kv04-media-grid--3,
+	.kv04-media-grid--4,
+	.kv04-media-grid--more {
+		width: min(100%, 280px);
+	}
+
+	.kv04-media-item__remove {
+		opacity: 1;
+	}
+}

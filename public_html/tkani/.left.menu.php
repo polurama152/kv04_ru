@@ -1,0 +1,25 @@
+<?
+$aMenuLinks = Array(
+	Array(
+		"Льняные", 
+		"/tkani/lnyanye.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Хлопчатобумажные", 
+		"/tkani/khlopchatobumazhnye.php", 
+		Array(), 
+		Array(), 
+		"" 
+	),
+	Array(
+		"Шелковые", 
+		"/tkani/shelkovye.php", 
+		Array(), 
+		Array(), 
+		"" 
+	)
+);
+?>

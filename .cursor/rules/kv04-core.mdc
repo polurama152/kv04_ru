@@ -1,0 +1,33 @@
+---
+description: Core project rules for kv04.ru — local-only Bitrix, Marketplace target, MCP, specs
+alwaysApply: true
+---
+
+# kv04.ru — ядро
+
+Сайт: Bitrix, корень `public_html/`. Кастом только в `public_html/local/` и в публичных страницах. Цель — модули на [Маркетплейс](https://marketplace.1c-bitrix.ru/). Онбординг: `docs/ONBOARDING.md`.
+
+## Нельзя
+
+- Править ядро: `public_html/bitrix/**` (кроме явного запроса).
+- Трогать `D:\EDT_dev`.
+- Класть кастом в `/bitrix/modules/` «чтобы завелось».
+- Печатать пароли из `dbconn.php` / `.settings.php`.
+- Править `docs/specs/` и `.serena/memories/` без явной команды пользователя.
+
+## Как кодить
+
+- Сначала Bitrix D7: `Loader`, компоненты, `Option`, ORM, `check_bitrix_sessid()`.
+- Сигнатуры модуля — **Bitrix MCP** (`searchDocs`, live API), не grep ядра.
+- Изящные идеи из других фреймворков — можно. Публичный контракт остаётся Bitrix: `partner.module`, `lib/`, `install/`, `lang/`.
+- PHP: UTF-8, `<?php`, namespace `Kv04\...` для модуля `kv04.*`.
+- UI-тексты — русский; ключи `$MESS` — английские константы.
+
+## Спеки и память
+
+- Правила: `.cursor/rules/*.mdc`. Спеки: `docs/specs/`. Память Serena: `.serena/memories/`.
+- По умолчанию — только код. Спеки и память — только когда пользователь явно просит («синхронизируй спеки», «обнови память»).
+
+## Deploy
+
+PhpStorm `autoUpload=Always` на сервер `kv04`. SSH: `infopolura@77.222.40.47`, путь `/home/i/infopolura/kv04_ru/public_html/`. Проверка: `curl -sS -o NUL -w "%{http_code}" https://kv04.ru/`.
