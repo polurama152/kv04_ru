@@ -15,7 +15,9 @@
 }
 
 .kv04-feed__head h1 {
-	margin: 0;
+	/* Кнопок в шапке стало две, поэтому заголовок прижимаем влево сам:
+	   space-between иначе растащил бы «Корзину» и «Выйти» по разным краям. */
+	margin: 0 auto 0 0;
 	font-size: clamp(1.2rem, 4vw, 1.45rem);
 	font-weight: 600;
 	letter-spacing: -0.02em;
@@ -827,4 +829,84 @@ body.kv04-lightbox-open {
 
 .kv04-note__body[contenteditable="true"]:focus {
 	box-shadow: inset 0 0 0 1px var(--kv04-accent);
+}
+
+/* Корзина. Удаление обратимо, поэтому подтверждения нет — здесь всё, что
+   удалено и ещё не вычищено по сроку. */
+.kv04-trash {
+	margin-bottom: 1rem;
+	padding: 0.9rem 1rem;
+	border: 1px solid var(--kv04-border);
+	border-radius: var(--kv04-radius);
+	background: var(--kv04-card);
+}
+
+.kv04-trash__head {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: baseline;
+	margin-bottom: 0.75rem;
+}
+
+.kv04-trash__title {
+	font-weight: 600;
+}
+
+.kv04-trash__note {
+	color: var(--kv04-text-muted);
+	font-size: 0.85rem;
+}
+
+.kv04-trash__head .kv04-btn {
+	margin-left: auto;
+}
+
+.kv04-trash__item {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 0.25rem 0.75rem;
+	align-items: center;
+	padding: 0.6rem 0;
+	border-top: 1px solid var(--kv04-border);
+}
+
+.kv04-trash__text {
+	grid-column: 1;
+	overflow-wrap: anywhere;
+}
+
+.kv04-trash__meta {
+	grid-column: 1;
+	color: var(--kv04-text-muted);
+	font-size: 0.82rem;
+}
+
+.kv04-trash__item .kv04-btn {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+}
+
+.kv04-trash__empty {
+	margin: 0;
+	color: var(--kv04-text-muted);
+	font-size: 0.9rem;
+}
+
+/* Строка возврата сразу после удаления — замена исчезнувшему вопросу. */
+.kv04-undo {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin-bottom: 0.75rem;
+	padding: 0.55rem 0.85rem;
+	border-radius: var(--kv04-radius);
+	background: var(--kv04-bg-secondary);
+	color: var(--kv04-text-muted);
+	font-size: 0.88rem;
+}
+
+.kv04-undo .kv04-btn {
+	margin-left: auto;
 }

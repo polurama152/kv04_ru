@@ -15,6 +15,9 @@ class NoteService
 	private const MAX_IMAGE = 8388608;
 	private const MAX_VIDEO = 20971520;
 
+	/** Сколько заметка лежит в корзине до окончательного удаления. */
+	public const TRASH_TTL = 604800;
+
 	/**
 	 * Барьер зависимости. Полагаться на то, что iblock подтянул
 	 * Installer::ensure(), нельзя: у него есть быстрый путь без
@@ -157,6 +160,11 @@ class NoteService
 		return ['ok' => true, 'text' => $html];
 	}
 
+	/**
+	 * Удаление мягкое: заметка становится неактивной и получает время
+	 * попадания в корзину. Спрашивать подтверждение поэтому незачем —
+	 * вернуть можно в течение срока хранения.
+	 */
 	public static function delete(string $ownerId, int $id): array
 	{
 		self::requireIblock();
@@ -165,8 +173,110 @@ class NoteService
 		{
 			return ['ok' => false, 'error' => 'Нельзя удалить чужую запись'];
 		}
-		CIBlockElement::Delete($id);
-		return ['ok' => true];
+
+		$element = new CIBlockElement();
+		if (!$element->Update($id, ['ACTIVE' => 'N']))
+		{
+			return ['ok' => false, 'error' => $element->LAST_ERROR ?: 'Не удалось удалить'];
+		}
+		CIBlockElement::SetPropertyValuesEx($id, self::iblockId(), ['DELETED_AT' => time()]);
+
+		return ['ok' => true, 'trash_days' => (int)ceil(self::TRASH_TTL / 86400)];
+	}
+
+	/** Вернуть заметку из корзины. */
+	public static function restore(string $ownerId, int $id): array
+	{
+		self::requireIblock();
+
+		if (!self::owns($ownerId, $id))
+		{
+			return ['ok' => false, 'error' => 'Нельзя вернуть чужую запись'];
+		}
+
+		$element = new CIBlockElement();
+		if (!$element->Update($id, ['ACTIVE' => 'Y']))
+		{
+			return ['ok' => false, 'error' => $element->LAST_ERROR ?: 'Не удалось вернуть'];
+		}
+		CIBlockElement::SetPropertyValuesEx($id, self::iblockId(), ['DELETED_AT' => false]);
+
+		return ['ok' => true, 'item' => self::get($ownerId, $id)];
+	}
+
+	/** Содержимое корзины: то, что удалено и ещё не вычищено по сроку. */
+	public static function trash(string $ownerId): array
+	{
+		self::requireIblock();
+
+		$items = [];
+		$now = time();
+		$res = CIBlockElement::GetList(
+			['ID' => 'DESC'],
+			[
+				'IBLOCK_ID' => self::iblockId(),
+				'ACTIVE' => 'N',
+				'PROPERTY_OWNER' => $ownerId,
+				'CHECK_PERMISSIONS' => 'N',
+			],
+			false,
+			['nTopCount' => 100],
+			['ID', 'NAME', 'DETAIL_TEXT', 'DATE_CREATE', 'PROPERTY_DELETED_AT']
+		);
+		while ($fields = $res->GetNext())
+		{
+			$item = self::buildItem($fields);
+			$deletedAt = (int)($fields['PROPERTY_DELETED_AT_VALUE'] ?? 0);
+			$item['deleted_at'] = $deletedAt;
+			$item['expires_in'] = $deletedAt > 0
+				? max(0, $deletedAt + self::TRASH_TTL - $now)
+				: self::TRASH_TTL;
+			$items[] = $item;
+		}
+
+		return $items;
+	}
+
+	/**
+	 * Окончательно стирает то, что пролежало в корзине дольше срока.
+	 * Вызывается при открытии корзины и изредка при показе ленты: отдельного
+	 * планировщика у модуля нет, а агенты Bitrix на этом хостинге не крутятся.
+	 *
+	 * @return int сколько заметок удалено насовсем
+	 */
+	public static function purgeExpired(): int
+	{
+		self::requireIblock();
+
+		$threshold = time() - self::TRASH_TTL;
+		$res = CIBlockElement::GetList(
+			['ID' => 'ASC'],
+			[
+				'IBLOCK_ID' => self::iblockId(),
+				'ACTIVE' => 'N',
+				'!PROPERTY_DELETED_AT' => false,
+				'<=PROPERTY_DELETED_AT' => $threshold,
+				'CHECK_PERMISSIONS' => 'N',
+			],
+			false,
+			['nTopCount' => 100],
+			['ID']
+		);
+
+		$removed = 0;
+		while ($row = $res->Fetch())
+		{
+			$id = (int)$row['ID'];
+			// Файлы за элементом сами не уходят — иначе в upload/ копился бы мусор.
+			foreach (self::mediaFileIds($id) as $fileId)
+			{
+				CFile::Delete($fileId);
+			}
+			CIBlockElement::Delete($id);
+			$removed++;
+		}
+
+		return $removed;
 	}
 
 	public static function attach(string $ownerId, int $id, array $files): array

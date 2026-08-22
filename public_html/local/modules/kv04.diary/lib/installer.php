@@ -24,8 +24,9 @@ class Installer
 	 * Версия схемы данных. Поднимать при изменении структуры HL, инфоблока или
 	 * своих таблиц — это заставит ensure() один раз переприменить схему на
 	 * каждом сервере. 2: таблица попыток входа. 3: UF_EMAIL.
+	 * 4: свойство DELETED_AT под корзину.
 	 */
-	private const SCHEMA_VERSION = '3';
+	private const SCHEMA_VERSION = '4';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -262,6 +263,9 @@ class Installer
 
 		self::ensureProperty($iblockId, 'OWNER', 'Владелец', 'S', 'N');
 		self::ensureProperty($iblockId, 'MEDIA', 'Медиа', 'F', 'Y');
+		// Время попадания в корзину. Заметка при удалении не стирается, а
+		// становится неактивной; отсюда же считается срок хранения.
+		self::ensureProperty($iblockId, 'DELETED_AT', 'Удалено', 'N', 'N');
 
 		return $iblockId;
 	}

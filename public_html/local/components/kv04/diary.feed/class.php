@@ -39,6 +39,14 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		// Дневник, заведённый до появления идентичности, просим привязать почту:
 		// без неё он остаётся в переходной ветке, где пин ищется глобально.
 		$this->arResult['NEEDS_EMAIL'] = !PinService::hasEmail($ownerId);
+		$this->arResult['TRASH_DAYS'] = (int)ceil(NoteService::TRASH_TTL / 86400);
+		// Планировщика у модуля нет, агенты Bitrix на этом хостинге не крутятся,
+		// поэтому просроченное чистим изредка на показе ленты — и всегда при
+		// открытии корзины.
+		if (random_int(1, 20) === 1)
+		{
+			NoteService::purgeExpired();
+		}
 		$this->arResult['ITEMS'] = NoteService::list($ownerId);
 		$this->includeComponentTemplate();
 	}
@@ -50,6 +58,17 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		{
 			Auth::clear();
 			$this->json(['ok' => true, 'reload' => true]);
+			return;
+		}
+
+		if ($action === 'trash')
+		{
+			NoteService::purgeExpired();
+			$this->json([
+				'ok' => true,
+				'items' => NoteService::trash($ownerId),
+				'days' => (int)ceil(NoteService::TRASH_TTL / 86400),
+			]);
 			return;
 		}
 
@@ -78,6 +97,11 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		if ($action === 'delete')
 		{
 			$this->json(NoteService::delete($ownerId, $id));
+			return;
+		}
+		if ($action === 'restore')
+		{
+			$this->json(NoteService::restore($ownerId, $id));
 			return;
 		}
 		if ($action === 'attach')

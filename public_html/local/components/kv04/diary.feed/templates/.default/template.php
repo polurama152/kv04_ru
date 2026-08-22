@@ -92,7 +92,17 @@ if (!function_exists('kv04DiaryRenderItems'))
 <div class="kv04-feed" id="kv04-feed">
 	<div class="kv04-feed__head">
 		<h1>Мой дневник</h1>
+		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-trash-open>Корзина</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-logout>Выйти</button>
+	</div>
+
+	<div class="kv04-trash" data-trash hidden>
+		<div class="kv04-trash__head">
+			<span class="kv04-trash__title">Корзина</span>
+			<span class="kv04-trash__note">Хранится <?=(int)$arResult['TRASH_DAYS']?> дней, потом удаляется насовсем</span>
+			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-trash-close>Закрыть</button>
+		</div>
+		<div class="kv04-trash__list" data-trash-list></div>
 	</div>
 
 <?php if (!empty($arResult['NEEDS_EMAIL'])): ?>
@@ -847,11 +857,10 @@ if (!function_exists('kv04DiaryRenderItems'))
 		bar.className = 'kv04-edit-bar';
 		bar.innerHTML =
 			'<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-edit-code>Код</button>' +
-			'<label class="kv04-btn kv04-btn--attach" title="Прикрепить">' +
-				'<svg class="kv04-icon-clip" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">' +
-					'<path fill="currentColor" d="M16.5 6v11.5a4 4 0 1 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 1 1-2 0V6h-1.5v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 1 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6H16.5z"/>' +
-				'</svg>' +
-				'<span class="kv04-btn__label">Прикрепить</span>' +
+			// Те же классы и та же подпись, что и в композере: кнопка делает
+			// одно и то же, выглядеть по-разному ей незачем.
+			'<label class="kv04-btn kv04-btn--muted kv04-btn--sm">' +
+				'Файл' +
 				'<input type="file" accept="image/*,video/mp4,video/webm" multiple hidden>' +
 			'</label>' +
 			'<span class="kv04-edit-bar__status" hidden></span>' +
@@ -926,15 +935,156 @@ if (!function_exists('kv04DiaryRenderItems'))
 			return;
 		}
 		if (e.target.closest('[data-delete]')) {
-			if (!confirm('Удалить заметку?')) return;
+			// Без подтверждения: удаление обратимо, заметка уходит в корзину.
+			// Вместо вопроса — строка с возвратом сразу после действия.
 			post({ action: 'delete', id: id }).then(function (data) {
-				if (data.ok) note.remove();
-			});
+				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
+				note.remove();
+				showUndoDelete(id, data.trash_days || 7);
+				// Корзина открыта — показываем в ней свежеудалённое сразу.
+				if (trashBox && !trashBox.hidden) openTrash();
+			}).catch(function () { alert('Нет связи'); });
 			return;
 		}
 		if (e.target.closest('[data-edit]') || isNoteEditClick(e, note)) {
 			startEdit(note);
 		}
+	});
+
+	// --- Корзина -----------------------------------------------------------
+
+	var trashBox = root.querySelector('[data-trash]');
+	var trashList = root.querySelector('[data-trash-list]');
+
+	function describeDays(seconds) {
+		var days = Math.ceil(seconds / 86400);
+		if (days <= 0) return 'удалится сегодня';
+		if (days === 1) return 'остался 1 день';
+		if (days >= 2 && days <= 4) return 'осталось ' + days + ' дня';
+		return 'осталось ' + days + ' дней';
+	}
+
+	// Короткая выжимка для строки корзины: показывать целую заметку там незачем.
+	function excerptOf(item) {
+		var probe = document.createElement('div');
+		probe.innerHTML = item.text || '';
+		var text = (probe.textContent || '').replace(/\s+/g, ' ').trim();
+		if (!text) {
+			return item.media && item.media.length
+				? 'Вложений: ' + item.media.length
+				: 'Пустая заметка';
+		}
+		return text.length > 90 ? text.slice(0, 90) + '…' : text;
+	}
+
+	function restoreNote(id, onDone) {
+		return post({ action: 'restore', id: id }).then(function (data) {
+			if (!data.ok) { alert(data.error || 'Ошибка'); return false; }
+			if (data.item) {
+				var note = createNoteElement(data.item);
+				// Возвращаем на своё место: лента идёт свежими вверх, поэтому
+				// встаём перед первой заметкой с меньшим номером.
+				var before = null;
+				var existing = list.querySelectorAll('.kv04-note');
+				for (var i = 0; i < existing.length; i++) {
+					if (parseInt(existing[i].getAttribute('data-id'), 10) < parseInt(id, 10)) {
+						before = existing[i];
+						break;
+					}
+				}
+				list.insertBefore(note, before);
+				highlight(note);
+			}
+			if (onDone) onDone();
+			return true;
+		}).catch(function () { alert('Нет связи'); return false; });
+	}
+
+	// Подтверждения перед удалением больше нет, поэтому возврат предлагаем
+	// сразу после действия — это заметнее и быстрее, чем идти в корзину.
+	function showUndoDelete(id, days) {
+		var bar = document.createElement('div');
+		bar.className = 'kv04-undo';
+		var text = document.createElement('span');
+		text.textContent = 'Заметка в корзине, хранится ' + days + ' дней';
+		bar.appendChild(text);
+		var back = document.createElement('button');
+		back.type = 'button';
+		back.className = 'kv04-btn kv04-btn--ghost kv04-btn--sm';
+		back.textContent = 'Вернуть';
+		bar.appendChild(back);
+		list.parentNode.insertBefore(bar, list);
+
+		// Подтверждения нет, поэтому окно возврата даём с запасом.
+		var timer = setTimeout(function () { bar.remove(); }, 15000);
+		back.addEventListener('click', function () {
+			clearTimeout(timer);
+			back.disabled = true;
+			restoreNote(id, function () { bar.remove(); });
+		});
+	}
+
+	function renderTrash(items, days) {
+		trashList.innerHTML = '';
+		if (!items.length) {
+			var empty = document.createElement('p');
+			empty.className = 'kv04-trash__empty';
+			empty.textContent = 'Пусто. Удалённые заметки лежат здесь ' + days + ' дней, потом стираются насовсем.';
+			trashList.appendChild(empty);
+			return;
+		}
+		items.forEach(function (item) {
+			var row = document.createElement('div');
+			row.className = 'kv04-trash__item';
+
+			var text = document.createElement('div');
+			text.className = 'kv04-trash__text';
+			text.textContent = excerptOf(item);
+			row.appendChild(text);
+
+			var meta = document.createElement('div');
+			meta.className = 'kv04-trash__meta';
+			meta.textContent = item.date + ' · ' + describeDays(item.expires_in);
+			row.appendChild(meta);
+
+			var back = document.createElement('button');
+			back.type = 'button';
+			back.className = 'kv04-btn kv04-btn--muted kv04-btn--sm';
+			back.textContent = 'Вернуть';
+			back.addEventListener('click', function () {
+				back.disabled = true;
+				restoreNote(item.id, function () {
+					row.remove();
+					if (!trashList.querySelector('.kv04-trash__item')) renderTrash([], days);
+				});
+			});
+			row.appendChild(back);
+
+			trashList.appendChild(row);
+		});
+	}
+
+	function openTrash() {
+		trashBox.hidden = false;
+		trashList.innerHTML = '';
+		var loading = document.createElement('p');
+		loading.className = 'kv04-trash__empty';
+		loading.textContent = 'Загрузка…';
+		trashList.appendChild(loading);
+
+		post({ action: 'trash' }).then(function (data) {
+			if (!data.ok) { trashList.innerHTML = ''; alert(data.error || 'Ошибка'); return; }
+			renderTrash(data.items || [], data.days || 7);
+		}).catch(function () {
+			loading.textContent = 'Нет связи';
+		});
+	}
+
+	root.querySelector('[data-trash-open]').addEventListener('click', function () {
+		if (trashBox.hidden) { openTrash(); } else { trashBox.hidden = true; }
+	});
+	root.querySelector('[data-trash-close]').addEventListener('click', function () {
+		trashBox.hidden = true;
 	});
 
 	var attachBox = root.querySelector('[data-attach-email]');
