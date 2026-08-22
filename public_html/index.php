@@ -29,6 +29,7 @@ $kv04DiaryAsset = static function (string $path): string {
 };
 
 $kv04DiaryThemeCss = '/local/modules/kv04.diary/assets/diary-theme.css';
+$kv04DiaryHljsCss = '/local/modules/kv04.diary/assets/highlight/atom-one-dark.min.css';
 $kv04DiaryComponentCss = '/local/components/kv04/diary.pin/templates/.default/style.css';
 $kv04DiaryFeed = $kv04DiaryLoaded && Auth::isLoggedIn();
 if ($kv04DiaryFeed)
@@ -49,7 +50,7 @@ if ($kv04DiaryFeed)
 	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryComponentCss)) ?>">
 	<?php endif; ?>
 	<?php if ($kv04DiaryFeed): ?>
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryHljsCss)) ?>">
 	<?php endif; ?>
 </head>
 <body class="kv04-diary-body">

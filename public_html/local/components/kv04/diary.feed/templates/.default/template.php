@@ -227,7 +227,17 @@ foreach ($kv04Books as $kv04Book)
 	</div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<?php
+/**
+ * highlight.js лежит рядом с модулем, а не на cdnjs: сторонний домен стоил
+ * браузеру отдельных DNS и TLS на первой загрузке дневника, до того как
+ * покажется хоть строчка. Метка mtime даёт новый URL, когда файл обновится, —
+ * так же, как у стилей в index.php.
+ */
+$kv04HljsSrc = '/local/modules/kv04.diary/assets/highlight/highlight.min.js';
+$kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
+?>
+<script src="<?=htmlspecialcharsbx($kv04HljsSrc . ($kv04HljsVersion > 0 ? '?v=' . $kv04HljsVersion : ''))?>"></script>
 <script>
 (function () {
 	var root = document.getElementById('kv04-feed');
