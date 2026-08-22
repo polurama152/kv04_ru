@@ -17,8 +17,13 @@ class Html
 
 		$html = preg_replace('#<script\b[^>]*>.*?</script>#is', '', $html) ?? '';
 		$html = preg_replace('#on\w+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)#i', '', $html) ?? '';
-		$html = strip_tags($html, '<p><br><a><pre><code><img><video><source><span><div>');
-		$html = preg_replace('#javascript:#i', '', $html) ?? '';
+
+		// <a> из белого списка убран намеренно. Ссылки в заметке не хранятся
+		// разметкой: адрес лежит обычным текстом, а кликабельным его делает
+		// показ. Значит опасной ссылке в базе взяться неоткуда, и вырезать
+		// строку javascript: из текста больше не нужно — раньше она пропадала
+		// и из обычной прозы, стоило написать о ней в заметке.
+		$html = strip_tags($html, '<p><br><pre><code><img><video><source><span><div>');
 
 		foreach ($codeBlocks as $key => $block)
 		{

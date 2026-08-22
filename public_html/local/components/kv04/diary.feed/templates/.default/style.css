@@ -976,3 +976,24 @@ body.kv04-lightbox-open {
 	font-size: 0.75rem;
 	vertical-align: baseline;
 }
+
+/* Ссылки в заметках. Разметка не хранится: адрес лежит в базе обычным
+   текстом, ссылка навешивается при показе и снимается при сохранении. */
+.kv04-note__body a {
+	color: var(--kv04-accent);
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+	overflow-wrap: anywhere;
+}
+
+.kv04-note__body a:hover,
+.kv04-note__body a:focus-visible {
+	color: var(--kv04-accent-hover);
+}
+
+/* Во время правки ссылка — обычный текст: клик должен ставить курсор,
+   а не уводить со страницы. */
+.kv04-note__body[contenteditable="true"] a {
+	pointer-events: none;
+	cursor: text;
+}

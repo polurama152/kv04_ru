@@ -624,6 +624,93 @@ if (!function_exists('kv04DiaryRenderItems'))
 		return body;
 	}
 
+	// --- Ссылки ------------------------------------------------------------
+	//
+	// Адреса ищем по текстовым узлам, а не регуляркой по HTML: так не нужно
+	// заботиться об экранировании (текст кладётся через textContent) и нельзя
+	// случайно залезть внутрь тега. Внутри <pre> и <code> ссылки не трогаем —
+	// там адрес часть кода. Разметка ссылок нигде не хранится: в базе лежит
+	// обычный текст, ссылки навешиваются при показе, а сериализатор при
+	// сохранении отдаёт обратно только их текст.
+
+	// Веб-адрес, либо почта. Голые домены вроде example.com намеренно не
+	// ловим: в дневнике полно имён файлов и версий (script.js, readme.md,
+	// 1.2.3), и они превращались бы в ссылки.
+	function urlPattern() {
+		return /(?:https?:\/\/|www\.)[^\s<>"']+|(?:mailto:)?[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi;
+	}
+
+	function linkifyTextNode(node) {
+		var text = node.nodeValue;
+		var re = urlPattern();
+		var frag = document.createDocumentFragment();
+		var last = 0;
+		var match;
+
+		while ((match = re.exec(text)) !== null) {
+			var url = match[0];
+			var trail = '';
+
+			// Хвостовая пунктуация принадлежит фразе, а не адресу:
+			// «зайди на example.com.» — точка тут не часть ссылки.
+			var trimmed = url.replace(/[.,!?:;)\]}»"']+$/, '');
+			if (trimmed !== url) {
+				trail = url.slice(trimmed.length);
+				url = trimmed;
+			}
+			if (!url) continue;
+
+			if (match.index > last) {
+				frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+			}
+
+			var link = document.createElement('a');
+			// Схему проверять не нужно: шаблон пропускает только http, https,
+			// www и почту, поэтому javascript: сюда не попадёт.
+			if (url.indexOf('@') !== -1 && url.indexOf('//') === -1) {
+				link.href = 'mailto:' + url.replace(/^mailto:/i, '');
+			} else {
+				link.href = /^www\./i.test(url) ? 'https://' + url : url;
+			}
+			link.textContent = url;
+			link.target = '_blank';
+			link.rel = 'noopener noreferrer nofollow';
+			frag.appendChild(link);
+
+			if (trail) frag.appendChild(document.createTextNode(trail));
+			last = match.index + match[0].length;
+		}
+
+		if (!frag.childNodes.length) return;
+		if (last < text.length) {
+			frag.appendChild(document.createTextNode(text.slice(last)));
+		}
+		node.parentNode.replaceChild(frag, node);
+	}
+
+	function linkify(root) {
+		if (!root || !root.querySelectorAll) return;
+
+		var probe = /(?:https?:\/\/|www\.)[^\s<>"']|@[\w-]+\.[\w-]/i;
+		var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+			acceptNode: function (node) {
+				var parent = node.parentNode;
+				if (!parent || !parent.closest) return NodeFilter.FILTER_REJECT;
+				if (parent.closest('pre, code, a')) return NodeFilter.FILTER_REJECT;
+				return probe.test(node.nodeValue)
+					? NodeFilter.FILTER_ACCEPT
+					: NodeFilter.FILTER_REJECT;
+			}
+		});
+
+		// Сначала собираем, потом заменяем: правка DOM во время обхода
+		// сбивает обходчик.
+		var targets = [];
+		var node;
+		while ((node = walker.nextNode()) !== null) targets.push(node);
+		targets.forEach(linkifyTextNode);
+	}
+
 	// --- Блоки заметки -----------------------------------------------------
 	//
 	// Блок — то, что видно отдельным куском: <pre> с кодом либо текст между
@@ -646,6 +733,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 		wrap.className = 'kv04-note__block';
 		wrap.setAttribute('data-block', String(index));
 		wrap.innerHTML = html;
+		linkify(wrap);
 
 		var remove = document.createElement('button');
 		remove.type = 'button';
@@ -818,7 +906,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 
 	function isNoteEditClick(e, note) {
 		if (note.classList.contains('is-editing')) return false;
-		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-edit], [data-delete], [data-media-delete], [data-block-delete], .kv04-note__ops, .kv04-edit-bar')) {
+		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-edit], [data-delete], [data-media-delete], [data-block-delete], .kv04-note__ops, .kv04-edit-bar, a[href]')) {
 			return false;
 		}
 		return e.target.closest('.kv04-note') === note;
@@ -1295,6 +1383,8 @@ if (!function_exists('kv04DiaryRenderItems'))
 	}
 
 	highlight();
+	// Лента приходит с сервера обычным текстом: ссылки навешиваем здесь.
+	linkify(list);
 
 	// Подсвечиваем только добавленные узлы. Пока заметки появлялись через
 	// перезагрузку страницы, наблюдатель почти не срабатывал; теперь они
