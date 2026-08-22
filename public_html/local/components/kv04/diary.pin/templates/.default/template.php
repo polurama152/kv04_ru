@@ -19,7 +19,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	<div class="kv04-pin__dots" data-dots>
 		<span></span><span></span><span></span><span></span>
 	</div>
-	<input type="password" inputmode="numeric" maxlength="4" autocomplete="off" class="kv04-pin__hidden" data-pin autofocus aria-label="Пин-код">
+	<input type="password" inputmode="numeric" maxlength="4"
+		autocomplete="one-time-code" data-lpignore="true" data-1p-ignore data-bwignore
+		class="kv04-pin__hidden" data-pin autofocus aria-label="Пин-код">
 
 	<div class="kv04-pin__pad" data-pad>
 		<button type="button" data-digit="1">1</button>
@@ -38,7 +40,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 
 	<div class="kv04-pin__confirm" data-confirm hidden>
 		<label>Повторите пин</label>
-		<input type="password" inputmode="numeric" maxlength="4" autocomplete="off" class="kv04-input" data-pin-confirm>
+		<input type="password" inputmode="numeric" maxlength="4"
+			autocomplete="one-time-code" data-lpignore="true" data-1p-ignore data-bwignore
+			class="kv04-input" data-pin-confirm>
 	</div>
 
 	<p class="kv04-pin__error" data-error hidden></p>
@@ -66,6 +70,11 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	var needsEmail = root.getAttribute('data-needs-email') === '1';
 	var creating = false;
 	var sending = false;
+	// Длина пина на прошлом шаге. Нужна, чтобы отличить набор от подстановки:
+	// менеджер паролей Chrome вставляет все четыре цифры разом и шлёт один
+	// input — по такому событию входить нельзя.
+	var lastPinLength = 0;
+	var lastConfirmLength = 0;
 
 	function renderDots() {
 		var v = pinInput.value;
@@ -77,19 +86,35 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		error.hidden = !msg;
 		error.textContent = msg || '';
 	}
+	/**
+	 * Единая точка после любого изменения пина.
+	 * Отправляем только когда длина выросла ровно на единицу и достигла
+	 * четырёх: скачок с нуля до четырёх — это подстановка браузера или
+	 * вставка из буфера, а не осознанный ввод.
+	 */
+	function syncPin(allowSubmit) {
+		var length = pinInput.value.length;
+		var typedOneMore = length === lastPinLength + 1;
+		lastPinLength = length;
+		renderDots();
+		if (allowSubmit && typedOneMore) {
+			maybeSubmit(false);
+		}
+	}
 	function appendDigit(d) {
 		if (pinInput.value.length < 4) {
 			pinInput.value += d;
-			renderDots();
-			maybeSubmit(false);
+			syncPin(true);
 		}
 	}
 	function clearPin() {
 		pinInput.value = '';
+		lastPinLength = 0;
 		renderDots();
 	}
 	function deleteDigit() {
 		pinInput.value = pinInput.value.slice(0, -1);
+		lastPinLength = pinInput.value.length;
 		renderDots();
 	}
 	function emailFilled() {
@@ -193,6 +218,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		clearPin();
 		if (creating) {
 			confirmInput.value = '';
+			lastConfirmLength = 0;
 		}
 		pinInput.focus();
 	}
@@ -237,12 +263,17 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	}
 	pinInput.addEventListener('input', function () {
 		pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 4);
-		renderDots();
-		maybeSubmit(false);
+		syncPin(true);
 	});
 	confirmInput.addEventListener('input', function () {
 		confirmInput.value = confirmInput.value.replace(/\D/g, '').slice(0, 4);
-		maybeSubmit(false);
+		var length = confirmInput.value.length;
+		// Та же защита, что и у пина: подстановку целиком не принимаем.
+		var typedOneMore = length === lastConfirmLength + 1;
+		lastConfirmLength = length;
+		if (typedOneMore) {
+			maybeSubmit(false);
+		}
 	});
 	if (emailInput) {
 		emailInput.addEventListener('keydown', function (e) {
