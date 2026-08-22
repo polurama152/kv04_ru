@@ -1186,7 +1186,11 @@ body.kv04-lightbox-open {
 		transform: none;
 	}
 
-	.kv04-books__backdrop {
+	/* Показываем только при открытой панели, и только по классу.
+	   Атрибут hidden тут не работает: авторский display: block сильнее
+	   браузерного правила для [hidden], из-за чего подложка висела поверх
+	   всей страницы и глушила любые нажатия. */
+	.kv04-workspace.is-books-open .kv04-books__backdrop {
 		display: block;
 		position: fixed;
 		inset: 0;

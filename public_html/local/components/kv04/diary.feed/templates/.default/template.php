@@ -149,7 +149,7 @@ foreach ($kv04Books as $kv04Book)
 	<p class="kv04-books__limit" data-books-limit hidden></p>
 </aside>
 
-<div class="kv04-books__backdrop" data-books-backdrop hidden></div>
+<div class="kv04-books__backdrop" data-books-backdrop></div>
 
 <div class="kv04-feed" id="kv04-feed" data-max-books="<?=(int)($arResult['MAX_BOOKS'] ?? 50)?>">
 	<div class="kv04-feed__head">
@@ -1270,13 +1270,11 @@ foreach ($kv04Books as $kv04Book)
 	function openBooks() {
 		if (!workspace) return;
 		workspace.classList.add('is-books-open');
-		if (booksBackdrop) booksBackdrop.hidden = false;
 	}
 
 	function closeBooks() {
 		if (!workspace) return;
 		workspace.classList.remove('is-books-open');
-		if (booksBackdrop) booksBackdrop.hidden = true;
 	}
 
 	function currentBookId() {
