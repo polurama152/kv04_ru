@@ -106,7 +106,6 @@ if (!function_exists('kv04DiaryRenderItems'))
 				<div class="kv04-note__footer">
 					<time><?=htmlspecialcharsbx($item['date'])?></time>
 					<div class="kv04-note__ops">
-						<button type="button" class="kv04-btn kv04-btn--ghost kv04-btn--sm" data-edit>Изменить</button>
 						<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-delete>Удалить</button>
 					</div>
 				</div>
@@ -864,7 +863,6 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		var ops = document.createElement('div');
 		ops.className = 'kv04-note__ops';
 		ops.innerHTML =
-			'<button type="button" class="kv04-btn kv04-btn--ghost kv04-btn--sm" data-edit>Изменить</button>' +
 			'<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-delete>Удалить</button>';
 		footer.appendChild(ops);
 		note.appendChild(footer);
@@ -991,7 +989,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 	function isNoteEditClick(e, note) {
 		if (note.classList.contains('is-editing')) return false;
-		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-edit], [data-delete], [data-media-delete], [data-block-delete], .kv04-note__ops, .kv04-edit-bar, a[href]')) {
+		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], .kv04-note__ops, .kv04-edit-bar, a[href]')) {
 			return false;
 		}
 		return e.target.closest('.kv04-note') === note;
@@ -1256,7 +1254,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			}).catch(function () { alert('Нет связи'); });
 			return;
 		}
-		if (e.target.closest('[data-edit]') || isNoteEditClick(e, note)) {
+		if (isNoteEditClick(e, note)) {
 			startEdit(note);
 		}
 	});
