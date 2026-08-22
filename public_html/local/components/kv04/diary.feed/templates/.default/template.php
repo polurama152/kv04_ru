@@ -105,10 +105,8 @@ if (!function_exists('kv04DiaryRenderItems'))
 				<?php endif; ?>
 				<div class="kv04-note__footer">
 					<time><?=htmlspecialcharsbx($item['date'])?></time>
-					<div class="kv04-note__ops">
-						<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-delete>Удалить</button>
-					</div>
 				</div>
+				<button type="button" class="kv04-note__remove" data-delete aria-label="Удалить заметку" title="Удалить заметку">&times;</button>
 			</article>
 			<?php
 		}
@@ -860,15 +858,19 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		time.textContent = item.date || '';
 		footer.appendChild(time);
 
-		var ops = document.createElement('div');
-		ops.className = 'kv04-note__ops';
-		ops.innerHTML =
-			'<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-delete>Удалить</button>';
-		footer.appendChild(ops);
 		note.appendChild(footer);
 
 		// renderNoteMedia ищет .kv04-note__footer, поэтому только после append.
 		renderNoteMedia(note, item.media || []);
+
+		var remove = document.createElement('button');
+		remove.type = 'button';
+		remove.className = 'kv04-note__remove';
+		remove.setAttribute('data-delete', '');
+		remove.setAttribute('aria-label', 'Удалить заметку');
+		remove.title = 'Удалить заметку';
+		remove.innerHTML = '&times;';
+		note.appendChild(remove);
 
 		return note;
 	}
@@ -989,7 +991,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 	function isNoteEditClick(e, note) {
 		if (note.classList.contains('is-editing')) return false;
-		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], .kv04-note__ops, .kv04-edit-bar, a[href]')) {
+		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], .kv04-edit-bar, a[href]')) {
 			return false;
 		}
 		return e.target.closest('.kv04-note') === note;

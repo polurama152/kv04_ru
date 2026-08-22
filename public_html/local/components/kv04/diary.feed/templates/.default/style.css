@@ -177,7 +177,6 @@
 }
 
 .kv04-note:not(.is-editing) .kv04-note__media,
-.kv04-note:not(.is-editing) .kv04-note__ops,
 .kv04-note:not(.is-editing) .kv04-media-thumb,
 .kv04-note:not(.is-editing) .kv04-media-item__remove {
 	cursor: default;
@@ -273,23 +272,50 @@
 	white-space: nowrap;
 }
 
-.kv04-note__ops {
-	display: flex;
-	gap: 0.15rem;
+/* Крестик заметки — в правом верхнем углу пузыря, из той же семьи, что
+   крестик у вложения и у плитки дневника: круглый, всплывает по наведению,
+   краснеет под курсором. Слово «Удалить» занимало место в каждой заметке
+   ради действия, которое делают редко, а крестик в углу читается без слов. */
+.kv04-note__remove {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	z-index: 3;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.62);
+	color: #fff;
+	font-size: 1.1rem;
+	line-height: 1;
+	cursor: pointer;
 	opacity: 0;
-	transition: opacity 0.15s ease;
+	transition: opacity 0.15s ease, background 0.15s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
-.kv04-note:hover .kv04-note__ops,
-.kv04-note:focus-within .kv04-note__ops {
+.kv04-note:hover .kv04-note__remove,
+.kv04-note:focus-within .kv04-note__remove {
 	opacity: 1;
 }
 
-.kv04-note__ops .kv04-btn {
-	padding: 0.2rem 0.45rem;
-	font-size: 0.75rem;
-	min-height: auto;
-	border-radius: 6px;
+.kv04-note__remove:hover {
+	background: rgba(229, 57, 53, 0.92);
+}
+
+.kv04-note__remove:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 1px;
+	opacity: 1;
+}
+
+/* Во время правки угол занят текстом, а действия живут на панели правки. */
+.kv04-note.is-editing .kv04-note__remove {
+	display: none;
 }
 
 /* --- Media album grid (Telegram-like) --- */
@@ -409,10 +435,13 @@
 	min-width: 0;
 }
 
+/* Крестик файла — в левом верхнем углу картинки. Правый верхний угол пузыря
+   занял крестик самой заметки, и в заметке без текста они сошлись бы в одной
+   точке. Разделение читается: справа удаляют заметку, слева — отдельный файл. */
 .kv04-media-item__remove {
 	position: absolute;
 	top: 4px;
-	right: 4px;
+	left: 4px;
 	z-index: 2;
 	width: 24px;
 	height: 24px;
@@ -756,7 +785,7 @@ body.kv04-lightbox-open {
 		max-width: min(92%, 360px);
 	}
 
-	.kv04-note__ops {
+	.kv04-note__remove {
 		opacity: 1;
 	}
 
