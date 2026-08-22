@@ -24,9 +24,9 @@ class Installer
 	 * Версия схемы данных. Поднимать при изменении структуры HL, инфоблока или
 	 * своих таблиц — это заставит ensure() один раз переприменить схему на
 	 * каждом сервере. 2: таблица попыток входа. 3: UF_EMAIL.
-	 * 4: свойство DELETED_AT под корзину.
+	 * 4: свойство DELETED_AT под корзину. 5: таблица обрывков заметок.
 	 */
-	private const SCHEMA_VERSION = '4';
+	private const SCHEMA_VERSION = '5';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -66,6 +66,7 @@ class Installer
 		$hlId = self::ensureHighload();
 		$iblockId = self::ensureIblock();
 		self::ensureAttemptsTable();
+		self::ensureTrashTable();
 
 		self::setOption('hlblock_id', (string)$hlId);
 		self::setOption('iblock_id', (string)$iblockId);
@@ -98,6 +99,37 @@ class Installer
 			. 'LAST_FAIL INT NOT NULL DEFAULT 0,'
 			. 'PRIMARY KEY (LOCK_KEY),'
 			. 'INDEX IX_KV04_DIARY_ATTEMPTS_LAST (LAST_FAIL)'
+			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
+	}
+
+	/**
+	 * Корзина для обрывков заметки: отдельного файла или блока текста и кода.
+	 * Целая заметка в корзину не сюда — она просто становится неактивной, а
+	 * здесь лежат куски, которым не на чем «побыть неактивными».
+	 */
+	private static function ensureTrashTable(): void
+	{
+		$connection = Application::getConnection();
+		if ($connection->isTableExists(NoteService::TRASH_TABLE))
+		{
+			return;
+		}
+
+		$connection->queryExecute(
+			'CREATE TABLE IF NOT EXISTS ' . NoteService::TRASH_TABLE . ' ('
+			. 'ID INT NOT NULL AUTO_INCREMENT,'
+			. 'OWNER_ID VARCHAR(40) NOT NULL,'
+			. 'ELEMENT_ID INT NOT NULL,'
+			. 'KIND VARCHAR(8) NOT NULL,'
+			. 'FILE_ID INT NOT NULL DEFAULT 0,'
+			. 'BLOCK_POS INT NOT NULL DEFAULT 0,'
+			. 'PAYLOAD MEDIUMTEXT NULL,'
+			. 'EXCERPT VARCHAR(255) NULL,'
+			. 'DELETED_AT INT NOT NULL DEFAULT 0,'
+			. 'PRIMARY KEY (ID),'
+			. 'INDEX IX_KV04_DIARY_TRASH_OWNER (OWNER_ID, DELETED_AT),'
+			. 'INDEX IX_KV04_DIARY_TRASH_AGE (DELETED_AT)'
 			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
 		);
 	}

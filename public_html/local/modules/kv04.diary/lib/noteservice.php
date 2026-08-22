@@ -2,6 +2,7 @@
 
 namespace Kv04\Diary;
 
+use Bitrix\Main\Application;
 use Bitrix\Main\Config\Option;
 use Bitrix\Main\Loader;
 use CIBlockElement;
@@ -15,8 +16,11 @@ class NoteService
 	private const MAX_IMAGE = 8388608;
 	private const MAX_VIDEO = 20971520;
 
-	/** Сколько заметка лежит в корзине до окончательного удаления. */
+	/** Сколько удалённое лежит в корзине до окончательного удаления. */
 	public const TRASH_TTL = 604800;
+
+	/** Обрывки заметки: отдельный файл или блок текста и кода. */
+	public const TRASH_TABLE = 'kv04_diary_trash';
 
 	/**
 	 * Барьер зависимости. Полагаться на то, что iblock подтянул
@@ -276,7 +280,7 @@ class NoteService
 			$removed++;
 		}
 
-		return $removed;
+		return $removed + self::purgeFragments($threshold);
 	}
 
 	public static function attach(string $ownerId, int $id, array $files): array
@@ -322,9 +326,264 @@ class NoteService
 		));
 
 		self::setMediaProperty($id, $remaining);
-		CFile::Delete($fileId);
+		// Сам файл не трогаем: он понадобится, если вернут из корзины.
+		// Окончательно уйдёт в purgeExpired() вместе со строкой корзины.
+		$file = CFile::GetFileArray($fileId);
+		$trashId = self::pushFragment($ownerId, $id, 'media', [
+			'file_id' => $fileId,
+			// Сорт записи показывает сам интерфейс, приставка тут лишняя.
+			'excerpt' => (string)($file['ORIGINAL_NAME'] ?? $file['FILE_NAME'] ?? $fileId),
+		]);
 
-		return ['ok' => true, 'media' => self::mediaFromFileIds($remaining)];
+		return [
+			'ok' => true,
+			'media' => self::mediaFromFileIds($remaining),
+			'trash_id' => $trashId,
+			'trash_days' => (int)ceil(self::TRASH_TTL / 86400),
+		];
+	}
+
+	/**
+	 * Разбор заметки на блоки. Блок — это то, что видно отдельным куском:
+	 * <pre> с кодом либо связный кусок текста между ними. Разбор одинаковый
+	 * на сервере и на фронте, поэтому номера блоков совпадают.
+	 *
+	 * @return array<int, array{type: string, html: string}>
+	 */
+	public static function splitBlocks(string $html): array
+	{
+		$parts = preg_split('#(<pre\b.*?</pre>)#is', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+		if ($parts === false)
+		{
+			return $html === '' ? [] : [['type' => 'text', 'html' => $html]];
+		}
+
+		$blocks = [];
+		foreach ($parts as $part)
+		{
+			$isCode = stripos($part, '<pre') === 0;
+			if (!$isCode && trim($part) === '')
+			{
+				continue;
+			}
+			$blocks[] = ['type' => $isCode ? 'code' : 'text', 'html' => $part];
+		}
+
+		return $blocks;
+	}
+
+	/** Удалить блок заметки целиком, отправив его в корзину. */
+	public static function deleteBlock(string $ownerId, int $id, int $index): array
+	{
+		self::requireIblock();
+
+		$note = self::get($ownerId, $id);
+		if (!$note)
+		{
+			return ['ok' => false, 'error' => 'Заметка не найдена'];
+		}
+
+		$blocks = self::splitBlocks((string)$note['text']);
+		if (!isset($blocks[$index]))
+		{
+			return ['ok' => false, 'error' => 'Блок не найден'];
+		}
+
+		$removed = $blocks[$index];
+
+		// Запоминаем не номер блока, а позицию в символах: соседние куски
+		// текста после удаления кода между ними сливаются в один, и номер
+		// перестаёт указывать на то же место. Смещение переживает слияние.
+		$beforeHtml = implode('', array_column(array_slice($blocks, 0, $index), 'html'));
+		$afterHtml = implode('', array_column(array_slice($blocks, $index + 1), 'html'));
+		$restPosition = mb_strlen($beforeHtml);
+		$rest = rtrim($beforeHtml . $afterHtml);
+		if ($index === 0)
+		{
+			// Сняли первый блок — обрезка слева ничего не сдвинет.
+			$rest = ltrim($rest);
+			$restPosition = 0;
+		}
+
+		// Ушёл последний блок текста, и медиа тоже нет — в корзину едет вся
+		// заметка, иначе осталась бы пустая карточка. Если медиа есть, заметка
+		// остаётся: она может состоять из одних файлов, это нормальная заметка.
+		if ($rest === '' && !$note['media'])
+		{
+			return self::delete($ownerId, $id) + ['note_deleted' => true];
+		}
+
+		$element = new CIBlockElement();
+		if (!$element->Update($id, [
+			'NAME' => Html::excerpt($rest),
+			'DETAIL_TEXT' => $rest,
+			'DETAIL_TEXT_TYPE' => 'html',
+		]))
+		{
+			return ['ok' => false, 'error' => $element->LAST_ERROR ?: 'Не удалось удалить блок'];
+		}
+
+		$trashId = self::pushFragment($ownerId, $id, 'block', [
+			'block_pos' => $restPosition,
+			'payload' => $removed['html'],
+			'excerpt' => Html::excerpt($removed['html'], 70),
+		]);
+
+		return [
+			'ok' => true,
+			'text' => $rest,
+			// Явный признак вместо догадок по пустому тексту: пустой текст при
+			// живых медиа — это по-прежнему заметка, убирать её из ленты нельзя.
+			'note_deleted' => false,
+			'trash_id' => $trashId,
+			'trash_days' => (int)ceil(self::TRASH_TTL / 86400),
+		];
+	}
+
+	/** Корзина целиком: удалённые заметки и обрывки, ближе к концу срока — выше. */
+	public static function trashAll(string $ownerId): array
+	{
+		$items = [];
+		foreach (self::trash($ownerId) as $note)
+		{
+			$items[] = [
+				'kind' => 'note',
+				'id' => $note['id'],
+				'excerpt' => Html::excerpt($note['text'], 90),
+				'date' => $note['date'],
+				'expires_in' => $note['expires_in'],
+			];
+		}
+
+		$now = time();
+		$connection = Application::getConnection();
+		$rows = $connection->query(sprintf(
+			'SELECT ID, ELEMENT_ID, KIND, EXCERPT, DELETED_AT FROM %s WHERE OWNER_ID = %s ORDER BY ID DESC LIMIT 200',
+			self::TRASH_TABLE,
+			$connection->getSqlHelper()->convertToDbString($ownerId)
+		))->fetchAll();
+
+		foreach ($rows as $row)
+		{
+			$deletedAt = (int)$row['DELETED_AT'];
+			$items[] = [
+				'kind' => (string)$row['KIND'],
+				'trash_id' => (int)$row['ID'],
+				'note_id' => (int)$row['ELEMENT_ID'],
+				'excerpt' => (string)$row['EXCERPT'],
+				'date' => date('d.m.Y H:i:s', $deletedAt),
+				'expires_in' => max(0, $deletedAt + self::TRASH_TTL - $now),
+			];
+		}
+
+		usort($items, static fn(array $a, array $b): int => $a['expires_in'] <=> $b['expires_in']);
+
+		return $items;
+	}
+
+	/** Вернуть обрывок на место: файл — в медиа заметки, блок — в её текст. */
+	public static function restoreFragment(string $ownerId, int $trashId): array
+	{
+		self::requireIblock();
+
+		$connection = Application::getConnection();
+		$row = $connection->query(sprintf(
+			'SELECT * FROM %s WHERE ID = %d AND OWNER_ID = %s',
+			self::TRASH_TABLE,
+			$trashId,
+			$connection->getSqlHelper()->convertToDbString($ownerId)
+		))->fetch();
+
+		if (!$row)
+		{
+			return ['ok' => false, 'error' => 'В корзине не найдено'];
+		}
+
+		$elementId = (int)$row['ELEMENT_ID'];
+		$note = self::get($ownerId, $elementId);
+		if (!$note)
+		{
+			return ['ok' => false, 'error' => 'Заметка удалена — сначала верните её'];
+		}
+
+		if ((string)$row['KIND'] === 'media')
+		{
+			$merged = array_merge(self::mediaFileIds($elementId), [(int)$row['FILE_ID']]);
+			self::setMediaProperty($elementId, $merged);
+		}
+		else
+		{
+			// BLOCK_POS — смещение в символах, а не номер блока: так вернувшийся
+			// кусок встаёт ровно туда, откуда его забрали, даже если соседние
+			// куски текста успели слиться.
+			$current = (string)$note['text'];
+			$position = min((int)$row['BLOCK_POS'], mb_strlen($current));
+			$text = mb_substr($current, 0, $position) . (string)$row['PAYLOAD'] . mb_substr($current, $position);
+
+			$element = new CIBlockElement();
+			$element->Update($elementId, [
+				'NAME' => Html::excerpt($text),
+				'DETAIL_TEXT' => $text,
+				'DETAIL_TEXT_TYPE' => 'html',
+			]);
+		}
+
+		self::dropFragment($trashId);
+
+		return ['ok' => true, 'item' => self::get($ownerId, $elementId)];
+	}
+
+	/** @return int номер строки в корзине — по нему потом возвращают */
+	private static function pushFragment(string $ownerId, int $elementId, string $kind, array $data): int
+	{
+		$connection = Application::getConnection();
+		$helper = $connection->getSqlHelper();
+		$connection->queryExecute(sprintf(
+			'INSERT INTO %s (OWNER_ID, ELEMENT_ID, KIND, FILE_ID, BLOCK_POS, PAYLOAD, EXCERPT, DELETED_AT) '
+			. 'VALUES (%s, %d, %s, %d, %d, %s, %s, %d)',
+			self::TRASH_TABLE,
+			$helper->convertToDbString($ownerId),
+			$elementId,
+			$helper->convertToDbString($kind),
+			(int)($data['file_id'] ?? 0),
+			(int)($data['block_pos'] ?? 0),
+			$helper->convertToDbString((string)($data['payload'] ?? '')),
+			$helper->convertToDbString(mb_substr((string)($data['excerpt'] ?? ''), 0, 250)),
+			time()
+		));
+
+		return (int)$connection->getInsertedId();
+	}
+
+	private static function dropFragment(int $trashId): void
+	{
+		Application::getConnection()->queryExecute(sprintf(
+			'DELETE FROM %s WHERE ID = %d',
+			self::TRASH_TABLE,
+			$trashId
+		));
+	}
+
+	/** Просроченные обрывки: строку убираем, файл за ней — тоже. */
+	private static function purgeFragments(int $threshold): int
+	{
+		$connection = Application::getConnection();
+		$rows = $connection->query(sprintf(
+			'SELECT ID, KIND, FILE_ID FROM %s WHERE DELETED_AT <= %d LIMIT 200',
+			self::TRASH_TABLE,
+			$threshold
+		))->fetchAll();
+
+		foreach ($rows as $row)
+		{
+			if ((string)$row['KIND'] === 'media' && (int)$row['FILE_ID'] > 0)
+			{
+				CFile::Delete((int)$row['FILE_ID']);
+			}
+			self::dropFragment((int)$row['ID']);
+		}
+
+		return count($rows);
 	}
 
 	private static function mediaFileIds(int $elementId): array

@@ -66,7 +66,7 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 			NoteService::purgeExpired();
 			$this->json([
 				'ok' => true,
-				'items' => NoteService::trash($ownerId),
+				'items' => NoteService::trashAll($ownerId),
 				'days' => (int)ceil(NoteService::TRASH_TTL / 86400),
 			]);
 			return;
@@ -102,6 +102,16 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		if ($action === 'restore')
 		{
 			$this->json(NoteService::restore($ownerId, $id));
+			return;
+		}
+		if ($action === 'delete_block')
+		{
+			$this->json(NoteService::deleteBlock($ownerId, $id, (int)$this->request->getPost('block')));
+			return;
+		}
+		if ($action === 'restore_fragment')
+		{
+			$this->json(NoteService::restoreFragment($ownerId, (int)$this->request->getPost('trash_id')));
 			return;
 		}
 		if ($action === 'attach')

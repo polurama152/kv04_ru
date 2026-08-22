@@ -4,6 +4,33 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	die();
 }
 
+if (!function_exists('kv04DiaryRenderBlocks'))
+{
+	/**
+	 * Блок — то, что видно отдельным куском: код либо текст между блоками кода.
+	 * Разбор общий с фронтом, поэтому номера блоков совпадают.
+	 *
+	 * Разметку собираем строкой без единого лишнего пробела: тело заметки
+	 * выводится с white-space: pre-wrap и правится как contenteditable, поэтому
+	 * отступы шаблона между тегами стали бы частью текста и осели бы в базе
+	 * при первом же сохранении.
+	 */
+	function kv04DiaryRenderBlocks(string $text): string
+	{
+		$out = '';
+		foreach (\Kv04\Diary\NoteService::splitBlocks($text) as $index => $block)
+		{
+			$out .= '<div class="kv04-note__block" data-block="' . (int)$index . '">'
+				. $block['html']
+				. '<button type="button" class="kv04-block-remove" data-block-delete'
+				. ' aria-label="Удалить блок" title="Удалить блок">&times;</button>'
+				. '</div>';
+		}
+
+		return $out;
+	}
+}
+
 if (!function_exists('kv04DiaryRenderItems'))
 {
 	function kv04DiaryRenderItems(array $items): void
@@ -17,7 +44,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 			?>
 			<article class="kv04-note" data-id="<?=(int)$item['id']?>">
 				<?php if (!empty($item['text'])): ?>
-					<div class="kv04-note__body"><?=$item['text']?></div>
+					<div class="kv04-note__body"><?=kv04DiaryRenderBlocks((string)$item['text'])?></div>
 				<?php endif; ?>
 				<?php if ($mediaCount > 0): ?>
 					<div class="kv04-note__media kv04-media-grid kv04-media-grid--<?=$gridCount?><?=$mediaCount > 4 ? ' kv04-media-grid--more' : ''?>">
@@ -253,16 +280,34 @@ if (!function_exists('kv04DiaryRenderItems'))
 
 		function walk(node) {
 			var children = node.childNodes;
+			// Между обёртками блоков осмысленного текста быть не может —
+			// только отступы разметки. Забирать их в заметку нельзя, иначе
+			// они осели бы в базе и копились с каждым сохранением.
+			var betweenBlocks = node.querySelector
+				&& node.querySelector(':scope > .kv04-note__block') !== null;
+
 			for (var i = 0; i < children.length; i++) {
 				var child = children[i];
 
 				if (child.nodeType === 3) {
+					if (betweenBlocks && child.nodeValue.trim() === '') continue;
 					out += escapeForHtml(child.nodeValue);
 					continue;
 				}
 				if (child.nodeType !== 1) continue;
 
 				var tag = child.tagName.toLowerCase();
+
+				if (tag === 'button') {
+					// Крестик удаления блока — часть интерфейса, в тексте ему не место.
+					continue;
+				}
+				if (child.classList && child.classList.contains('kv04-note__block')) {
+					// Обёртка блока нужна только для показа: проходим насквозь,
+					// не добавляя перенос, иначе он копился бы с каждой правкой.
+					walk(child);
+					continue;
+				}
 
 				if (tag === 'pre') {
 					out += '<pre><code>' + escapeForHtml(codeTextOf(child)) + '</code></pre>';
@@ -403,6 +448,10 @@ if (!function_exists('kv04DiaryRenderItems'))
 	function resetCodeBlock(code) {
 		code.removeAttribute('data-highlighted');
 		code.className = '';
+		// Возвращаем чистый текст: hljs оборачивает подсветку в span-ы, и без
+		// сброса повторный проход красит поверх старой разметки — отсюда его
+		// предупреждение про unescaped HTML и лишние вложенные теги.
+		code.textContent = textWithBreaks(code);
 		var pre = code.closest('pre');
 		if (pre) {
 			pre.classList.remove('hljs');
@@ -575,6 +624,49 @@ if (!function_exists('kv04DiaryRenderItems'))
 		return body;
 	}
 
+	// --- Блоки заметки -----------------------------------------------------
+	//
+	// Блок — то, что видно отдельным куском: <pre> с кодом либо текст между
+	// такими блоками. Разбор повторяет NoteService::splitBlocks() на сервере,
+	// поэтому номера блоков совпадают и их можно передавать как есть.
+
+	function splitBlocksHtml(html) {
+		var parts = String(html || '').split(/(<pre\b[\s\S]*?<\/pre>)/i);
+		var blocks = [];
+		parts.forEach(function (part) {
+			var isCode = /^<pre\b/i.test(part);
+			if (!isCode && part.trim() === '') return;
+			blocks.push({ type: isCode ? 'code' : 'text', html: part });
+		});
+		return blocks;
+	}
+
+	function buildBlock(html, index) {
+		var wrap = document.createElement('div');
+		wrap.className = 'kv04-note__block';
+		wrap.setAttribute('data-block', String(index));
+		wrap.innerHTML = html;
+
+		var remove = document.createElement('button');
+		remove.type = 'button';
+		remove.className = 'kv04-block-remove';
+		remove.setAttribute('data-block-delete', '');
+		remove.setAttribute('aria-label', 'Удалить блок');
+		remove.title = 'Удалить блок';
+		remove.innerHTML = '&times;';
+		wrap.appendChild(remove);
+
+		return wrap;
+	}
+
+	function renderBody(body, html) {
+		body.innerHTML = '';
+		splitBlocksHtml(html).forEach(function (block, index) {
+			body.appendChild(buildBlock(block.html, index));
+		});
+		highlight(body);
+	}
+
 	// Разметка должна совпадать с kv04DiaryRenderItems() в этом же файле:
 	// одна и та же заметка приходит либо с сервера при загрузке страницы,
 	// либо отсюда после сохранения.
@@ -586,7 +678,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 		if (item.text) {
 			var body = document.createElement('div');
 			body.className = 'kv04-note__body';
-			body.innerHTML = item.text;
+			renderBody(body, item.text);
 			note.appendChild(body);
 		}
 
@@ -704,8 +796,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 		if (bar) bar.remove();
 		body.removeAttribute('contenteditable');
 		if (hasBody || html) {
-			body.innerHTML = html;
-			highlight(body);
+			renderBody(body, html);
 		} else {
 			body.remove();
 		}
@@ -727,7 +818,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 
 	function isNoteEditClick(e, note) {
 		if (note.classList.contains('is-editing')) return false;
-		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-edit], [data-delete], [data-media-delete], .kv04-note__ops, .kv04-edit-bar')) {
+		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-edit], [data-delete], [data-media-delete], [data-block-delete], .kv04-note__ops, .kv04-edit-bar')) {
 			return false;
 		}
 		return e.target.closest('.kv04-note') === note;
@@ -847,6 +938,8 @@ if (!function_exists('kv04DiaryRenderItems'))
 			var anchor = note.querySelector('.kv04-note__media') || note.querySelector('.kv04-note__footer');
 			note.insertBefore(body, anchor);
 		}
+		// На время правки крестики блоков убираем: они часть показа, а не текста.
+		body.querySelectorAll('[data-block-delete]').forEach(function (btn) { btn.remove(); });
 		// Правим ровно тот узел, который читали: ни разметка, ни стили не
 		// подменяются, поэтому отступы и блоки кода выглядят как в ленте.
 		var current = serializeForSave(body);
@@ -927,10 +1020,52 @@ if (!function_exists('kv04DiaryRenderItems'))
 			e.stopPropagation();
 			var removeBtn = e.target.closest('[data-media-delete]');
 			var fileId = removeBtn.getAttribute('data-file-id');
-			if (!fileId || !confirm('Удалить файл?')) return;
+			if (!fileId) return;
+			// Без подтверждения: файл уходит в корзину и возвращается оттуда.
 			post({ action: 'detach_media', id: id, file_id: fileId }).then(function (data) {
 				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
 				renderNoteMedia(note, data.media || []);
+				if (data.trash_id) {
+					showUndo('Файл в корзине', data.trash_days || 7, function () {
+						return restoreFragment(data.trash_id);
+					});
+				}
+				if (trashBox && !trashBox.hidden) openTrash();
+			}).catch(function () { alert('Нет связи'); });
+			return;
+		}
+		if (e.target.closest('[data-block-delete]')) {
+			e.preventDefault();
+			e.stopPropagation();
+			var block = e.target.closest('.kv04-note__block');
+			if (!block) return;
+			var index = parseInt(block.getAttribute('data-block'), 10);
+			post({ action: 'delete_block', id: id, block: index }).then(function (data) {
+				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
+
+				if (data.note_deleted) {
+					// Текста не осталось и медиа не было — ушла вся заметка.
+					note.remove();
+					showUndo('Заметка в корзине', data.trash_days || 7, function () {
+						return restoreNote(id);
+					});
+				} else {
+					var body = note.querySelector('.kv04-note__body');
+					if (data.text === '') {
+						// Текст кончился, но остались файлы: заметка из одних
+						// медиа — обычная заметка, убирать её из ленты нельзя.
+						if (body) body.remove();
+					} else {
+						// Номера блоков после удаления сдвигаются, поэтому тело
+						// перерисовываем целиком, а не убираем один узел.
+						renderBody(body, data.text);
+					}
+					showUndo('Блок в корзине', data.trash_days || 7, function () {
+						return restoreFragment(data.trash_id);
+					});
+				}
+
+				if (trashBox && !trashBox.hidden) openTrash();
 			}).catch(function () { alert('Нет связи'); });
 			return;
 		}
@@ -940,7 +1075,9 @@ if (!function_exists('kv04DiaryRenderItems'))
 			post({ action: 'delete', id: id }).then(function (data) {
 				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
 				note.remove();
-				showUndoDelete(id, data.trash_days || 7);
+				showUndo('Заметка в корзине', data.trash_days || 7, function () {
+					return restoreNote(id);
+				});
 				// Корзина открыта — показываем в ней свежеудалённое сразу.
 				if (trashBox && !trashBox.hidden) openTrash();
 			}).catch(function () { alert('Нет связи'); });
@@ -964,55 +1101,64 @@ if (!function_exists('kv04DiaryRenderItems'))
 		return 'осталось ' + days + ' дней';
 	}
 
-	// Короткая выжимка для строки корзины: показывать целую заметку там незачем.
-	function excerptOf(item) {
-		var probe = document.createElement('div');
-		probe.innerHTML = item.text || '';
-		var text = (probe.textContent || '').replace(/\s+/g, ' ').trim();
-		if (!text) {
-			return item.media && item.media.length
-				? 'Вложений: ' + item.media.length
-				: 'Пустая заметка';
+	function insertNoteInOrder(note, id) {
+		var before = null;
+		var existing = list.querySelectorAll('.kv04-note');
+		for (var i = 0; i < existing.length; i++) {
+			if (parseInt(existing[i].getAttribute('data-id'), 10) < parseInt(id, 10)) {
+				before = existing[i];
+				break;
+			}
 		}
-		return text.length > 90 ? text.slice(0, 90) + '…' : text;
+		list.insertBefore(note, before);
+		highlight(note);
 	}
 
-	function restoreNote(id, onDone) {
+	// Заметка могла остаться в ленте (вернули её кусок) или исчезнуть
+	// (вернули её саму) — обрабатываем оба случая одинаково.
+	function putNote(item) {
+		var fresh = createNoteElement(item);
+		var existing = list.querySelector('.kv04-note[data-id="' + item.id + '"]');
+		if (existing) {
+			existing.replaceWith(fresh);
+			highlight(fresh);
+			return;
+		}
+		insertNoteInOrder(fresh, item.id);
+	}
+
+	function restoreNote(id) {
 		return post({ action: 'restore', id: id }).then(function (data) {
 			if (!data.ok) { alert(data.error || 'Ошибка'); return false; }
-			if (data.item) {
-				var note = createNoteElement(data.item);
-				// Возвращаем на своё место: лента идёт свежими вверх, поэтому
-				// встаём перед первой заметкой с меньшим номером.
-				var before = null;
-				var existing = list.querySelectorAll('.kv04-note');
-				for (var i = 0; i < existing.length; i++) {
-					if (parseInt(existing[i].getAttribute('data-id'), 10) < parseInt(id, 10)) {
-						before = existing[i];
-						break;
-					}
-				}
-				list.insertBefore(note, before);
-				highlight(note);
-			}
-			if (onDone) onDone();
+			if (data.item) putNote(data.item);
+			return true;
+		}).catch(function () { alert('Нет связи'); return false; });
+	}
+
+	function restoreFragment(trashId) {
+		return post({ action: 'restore_fragment', trash_id: trashId }).then(function (data) {
+			if (!data.ok) { alert(data.error || 'Ошибка'); return false; }
+			if (data.item) putNote(data.item);
 			return true;
 		}).catch(function () { alert('Нет связи'); return false; });
 	}
 
 	// Подтверждения перед удалением больше нет, поэтому возврат предлагаем
 	// сразу после действия — это заметнее и быстрее, чем идти в корзину.
-	function showUndoDelete(id, days) {
+	function showUndo(message, days, onRestore) {
 		var bar = document.createElement('div');
 		bar.className = 'kv04-undo';
+
 		var text = document.createElement('span');
-		text.textContent = 'Заметка в корзине, хранится ' + days + ' дней';
+		text.textContent = message + ', хранится ' + days + ' дней';
 		bar.appendChild(text);
+
 		var back = document.createElement('button');
 		back.type = 'button';
 		back.className = 'kv04-btn kv04-btn--ghost kv04-btn--sm';
 		back.textContent = 'Вернуть';
 		bar.appendChild(back);
+
 		list.parentNode.insertBefore(bar, list);
 
 		// Подтверждения нет, поэтому окно возврата даём с запасом.
@@ -1020,8 +1166,21 @@ if (!function_exists('kv04DiaryRenderItems'))
 		back.addEventListener('click', function () {
 			clearTimeout(timer);
 			back.disabled = true;
-			restoreNote(id, function () { bar.remove(); });
+			Promise.resolve(onRestore()).then(function () {
+				bar.remove();
+				if (trashBox && !trashBox.hidden) openTrash();
+			});
 		});
+	}
+
+
+	// В корзине лежат вещи трёх сортов: целая заметка, отдельный файл и блок
+	// текста или кода. Возвращаются они по-разному, но для человека это одно
+	// действие — ткнуть в запись, поэтому кнопки у строк нет.
+	function trashLabel(item) {
+		if (item.kind === 'note') return 'Заметка';
+		if (item.kind === 'media') return 'Файл';
+		return 'Блок';
 	}
 
 	function renderTrash(items, days) {
@@ -1029,17 +1188,25 @@ if (!function_exists('kv04DiaryRenderItems'))
 		if (!items.length) {
 			var empty = document.createElement('p');
 			empty.className = 'kv04-trash__empty';
-			empty.textContent = 'Пусто. Удалённые заметки лежат здесь ' + days + ' дней, потом стираются насовсем.';
+			empty.textContent = 'Пусто. Удалённое лежит здесь ' + days + ' дней, потом стирается насовсем.';
 			trashList.appendChild(empty);
 			return;
 		}
+
 		items.forEach(function (item) {
 			var row = document.createElement('div');
 			row.className = 'kv04-trash__item';
+			row.setAttribute('role', 'button');
+			row.setAttribute('tabindex', '0');
+			row.title = 'Вернуть на место';
 
 			var text = document.createElement('div');
 			text.className = 'kv04-trash__text';
-			text.textContent = excerptOf(item);
+			var kind = document.createElement('span');
+			kind.className = 'kv04-trash__kind';
+			kind.textContent = trashLabel(item);
+			text.appendChild(kind);
+			text.appendChild(document.createTextNode(item.excerpt || ''));
 			row.appendChild(text);
 
 			var meta = document.createElement('div');
@@ -1047,18 +1214,26 @@ if (!function_exists('kv04DiaryRenderItems'))
 			meta.textContent = item.date + ' · ' + describeDays(item.expires_in);
 			row.appendChild(meta);
 
-			var back = document.createElement('button');
-			back.type = 'button';
-			back.className = 'kv04-btn kv04-btn--muted kv04-btn--sm';
-			back.textContent = 'Вернуть';
-			back.addEventListener('click', function () {
-				back.disabled = true;
-				restoreNote(item.id, function () {
+			function restoreThis() {
+				if (row.classList.contains('is-busy')) return;
+				row.classList.add('is-busy');
+				var task = item.kind === 'note'
+					? restoreNote(item.id)
+					: restoreFragment(item.trash_id);
+				Promise.resolve(task).then(function (ok) {
+					if (!ok) { row.classList.remove('is-busy'); return; }
 					row.remove();
 					if (!trashList.querySelector('.kv04-trash__item')) renderTrash([], days);
 				});
+			}
+
+			row.addEventListener('click', restoreThis);
+			row.addEventListener('keydown', function (e) {
+				// Строка работает кнопкой, значит и с клавиатуры должна.
+				if (e.key !== 'Enter' && e.key !== ' ') return;
+				e.preventDefault();
+				restoreThis();
 			});
-			row.appendChild(back);
 
 			trashList.appendChild(row);
 		});
