@@ -59,7 +59,6 @@ class NoteService
 			$filter['PROPERTY_BOOK'] = $bookId;
 		}
 
-		$items = [];
 		$res = CIBlockElement::GetList(
 			['ID' => 'DESC'],
 			$filter,
@@ -67,11 +66,14 @@ class NoteService
 			['nTopCount' => 100],
 			['ID', 'NAME', 'DETAIL_TEXT', 'DATE_CREATE']
 		);
+
+		$rows = [];
 		while ($fields = $res->GetNext())
 		{
-			$items[] = self::buildItem($fields);
+			$rows[] = $fields;
 		}
-		return $items;
+
+		return self::buildItems($rows);
 	}
 
 	/**
@@ -103,14 +105,45 @@ class NoteService
 
 	private static function buildItem(array $fields): array
 	{
-		$id = (int)$fields['ID'];
+		$items = self::buildItems([$fields]);
 
-		return [
-			'id' => $id,
-			'text' => (string)$fields['~DETAIL_TEXT'],
-			'date' => (string)$fields['DATE_CREATE'],
-			'media' => self::mediaFromFileIds(self::mediaFileIds($id)),
-		];
+		return $items[0];
+	}
+
+	/**
+	 * Лента целиком: файлы всех заметок берутся одним запросом.
+	 * Поштучно выходило по запросу на заметку, и внутри каждого Bitrix ещё
+	 * перечитывал метаданные инфоблока.
+	 *
+	 * @param array $rows строки CIBlockElement::GetList в порядке показа
+	 */
+	private static function buildItems(array $rows): array
+	{
+		if (!$rows)
+		{
+			return [];
+		}
+
+		$ids = [];
+		foreach ($rows as $fields)
+		{
+			$ids[] = (int)$fields['ID'];
+		}
+		$mediaIds = self::mediaFileIdsBatch($ids);
+
+		$items = [];
+		foreach ($rows as $fields)
+		{
+			$id = (int)$fields['ID'];
+			$items[] = [
+				'id' => $id,
+				'text' => (string)$fields['~DETAIL_TEXT'],
+				'date' => (string)$fields['DATE_CREATE'],
+				'media' => self::mediaFromFileIds($mediaIds[$id] ?? []),
+			];
+		}
+
+		return $items;
 	}
 
 	public static function add(string $ownerId, string $text, array $files = [], int $bookId = 0): array
@@ -246,10 +279,15 @@ class NoteService
 			['nTopCount' => 100],
 			['ID', 'NAME', 'DETAIL_TEXT', 'DATE_CREATE', 'PROPERTY_DELETED_AT']
 		);
+		$rows = [];
 		while ($fields = $res->GetNext())
 		{
-			$item = self::buildItem($fields);
-			$deletedAt = (int)($fields['PROPERTY_DELETED_AT_VALUE'] ?? 0);
+			$rows[] = $fields;
+		}
+
+		foreach (self::buildItems($rows) as $i => $item)
+		{
+			$deletedAt = (int)($rows[$i]['PROPERTY_DELETED_AT_VALUE'] ?? 0);
 			$item['deleted_at'] = $deletedAt;
 			$item['expires_in'] = $deletedAt > 0
 				? max(0, $deletedAt + self::TRASH_TTL - $now)
@@ -686,17 +724,48 @@ class NoteService
 
 	private static function mediaFileIds(int $elementId): array
 	{
-		$fileIds = [];
-		$propRes = CIBlockElement::GetProperty(self::iblockId(), $elementId, [], ['CODE' => 'MEDIA']);
-		while ($prop = $propRes->Fetch())
+		return self::mediaFileIdsBatch([$elementId])[$elementId] ?? [];
+	}
+
+	/**
+	 * Файлы сразу многих заметок, одним запросом.
+	 *
+	 * Читаем ту же таблицу, куда пишет setMediaProperty(): инфоблок заведён
+	 * с VERSION = 2, значит множественное свойство лежит отдельной таблицей.
+	 * Запись туда уже прямая — из-за TypeError в SetPropertyValuesEx на
+	 * PHP 8.4, — и чтение теперь симметрично записи.
+	 *
+	 * @return array<int, int[]> id заметки => id файлов в порядке прикрепления
+	 */
+	private static function mediaFileIdsBatch(array $elementIds): array
+	{
+		global $DB;
+
+		$propertyId = self::mediaPropertyId();
+		$ids = array_values(array_unique(array_filter(array_map('intval', $elementIds), static fn(int $id): bool => $id > 0)));
+		if ($propertyId <= 0 || !$ids)
 		{
-			if (!empty($prop['VALUE']))
+			return [];
+		}
+
+		$res = $DB->Query(sprintf(
+			'SELECT IBLOCK_ELEMENT_ID, VALUE FROM %s WHERE IBLOCK_PROPERTY_ID = %d AND IBLOCK_ELEMENT_ID IN (%s) ORDER BY ID',
+			'b_iblock_element_prop_m' . self::iblockId(),
+			$propertyId,
+			implode(',', $ids)
+		));
+
+		$map = [];
+		while ($row = $res->Fetch())
+		{
+			$fileId = (int)$row['VALUE'];
+			if ($fileId > 0)
 			{
-				$fileIds[] = (int)$prop['VALUE'];
+				$map[(int)$row['IBLOCK_ELEMENT_ID']][] = $fileId;
 			}
 		}
 
-		return $fileIds;
+		return $map;
 	}
 
 	/** Существует ли ещё дневник, к которому приписана заметка. */
