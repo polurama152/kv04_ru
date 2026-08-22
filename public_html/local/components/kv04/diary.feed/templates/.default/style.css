@@ -1213,3 +1213,36 @@ body.kv04-lightbox-open {
 		opacity: 1;
 	}
 }
+
+/* Заголовок правится по клику — там же, где виден. Курсор об этом говорит. */
+.kv04-feed__head h1 {
+	cursor: text;
+	border-radius: calc(var(--kv04-radius) - 6px);
+	padding: 0.1rem 0.3rem;
+	margin-left: -0.3rem;
+	transition: background 0.15s ease;
+}
+
+.kv04-feed__head h1:hover {
+	background: var(--kv04-card-hover);
+}
+
+.kv04-feed__title-input {
+	flex: 1 1 12rem;
+	min-width: 0;
+	padding: 0.1rem 0.3rem;
+	border: 1px solid var(--kv04-accent);
+	border-radius: calc(var(--kv04-radius) - 6px);
+	background: var(--kv04-bg);
+	color: var(--kv04-text);
+	font: inherit;
+	font-size: clamp(1.2rem, 4vw, 1.45rem);
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	outline: none;
+}
+
+/* Открытая плитка тоже правится по клику. */
+.kv04-book.is-current .kv04-book__open {
+	cursor: text;
+}

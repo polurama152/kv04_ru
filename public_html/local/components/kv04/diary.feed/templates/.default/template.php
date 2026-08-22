@@ -139,8 +139,7 @@ foreach ($kv04Books as $kv04Book)
 		<?php foreach ($kv04Books as $kv04Book): ?>
 			<?php $kv04IsCurrent = (int)$kv04Book['id'] === $kv04CurrentBook; ?>
 			<div class="kv04-book<?=$kv04IsCurrent ? ' is-current' : ''?>" data-book="<?=(int)$kv04Book['id']?>">
-				<button type="button" class="kv04-book__open" data-book-open title="<?=htmlspecialcharsbx($kv04Book['title'])?>"><?=htmlspecialcharsbx($kv04Book['title'])?></button>
-				<button type="button" class="kv04-book__act" data-book-rename aria-label="Переименовать" title="Переименовать">&#9998;</button>
+				<button type="button" class="kv04-book__open" data-book-open title="<?=htmlspecialcharsbx($kv04Book['title'])?><?=$kv04IsCurrent ? ' — нажмите, чтобы переименовать' : ''?>"><?=htmlspecialcharsbx($kv04Book['title'])?></button>
 				<button type="button" class="kv04-book__act kv04-book__act--danger" data-book-delete aria-label="Удалить дневник" title="Удалить дневник">&times;</button>
 			</div>
 		<?php endforeach; ?>
@@ -154,7 +153,7 @@ foreach ($kv04Books as $kv04Book)
 <div class="kv04-feed" id="kv04-feed" data-max-books="<?=(int)($arResult['MAX_BOOKS'] ?? 50)?>">
 	<div class="kv04-feed__head">
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm kv04-feed__books" data-books-open>Дневники</button>
-		<h1 data-current-title><?=htmlspecialcharsbx($kv04CurrentTitle)?></h1>
+		<h1 data-current-title title="Нажмите, чтобы переименовать"><?=htmlspecialcharsbx($kv04CurrentTitle)?></h1>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-trash-open>Корзина</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-logout>Выйти</button>
 	</div>
@@ -1303,17 +1302,8 @@ foreach ($kv04Books as $kv04Book)
 		open.className = 'kv04-book__open';
 		open.setAttribute('data-book-open', '');
 		open.textContent = book.title;
-		open.title = book.title;
+		open.title = isCurrent ? book.title + ' — нажмите, чтобы переименовать' : book.title;
 		tile.appendChild(open);
-
-		var rename = document.createElement('button');
-		rename.type = 'button';
-		rename.className = 'kv04-book__act';
-		rename.setAttribute('data-book-rename', '');
-		rename.setAttribute('aria-label', 'Переименовать');
-		rename.title = 'Переименовать';
-		rename.innerHTML = '&#9998;';
-		tile.appendChild(rename);
 
 		var remove = document.createElement('button');
 		remove.type = 'button';
@@ -1337,18 +1327,17 @@ foreach ($kv04Books as $kv04Book)
 		syncBooksLimit();
 	}
 
-	// Заголовок правится прямо на плитке: отдельное окно ради одной строки —
-	// лишний шаг. Enter сохраняет, Escape отменяет.
-	function editTitle(tile, initial, onDone) {
-		var label = tile.querySelector('.kv04-book__open');
-		if (!label) return;
+	// Правка заголовка на месте: узел подменяется полем, Enter сохраняет,
+	// Escape отменяет, потеря фокуса тоже сохраняет. Одинаково работает и на
+	// плитке, и в шапке ленты — заголовок правится там, где его видно, как и
+	// сама заметка.
+	function editInPlace(node, initial, className, onDone) {
 		var input = document.createElement('input');
 		input.type = 'text';
-		input.className = 'kv04-book__input';
+		input.className = className;
 		input.value = initial;
 		input.maxLength = 120;
-		label.replaceWith(input);
-		tile.classList.add('is-editing');
+		node.replaceWith(input);
 		input.focus();
 		input.select();
 
@@ -1356,8 +1345,8 @@ foreach ($kv04Books as $kv04Book)
 		function finish(save) {
 			if (finished) return;
 			finished = true;
-			tile.classList.remove('is-editing');
-			onDone(save ? input.value : null, input);
+			input.replaceWith(node);
+			onDone(save ? input.value : null);
 		}
 
 		input.addEventListener('keydown', function (e) {
@@ -1365,6 +1354,26 @@ foreach ($kv04Books as $kv04Book)
 			else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
 		});
 		input.addEventListener('blur', function () { finish(true); });
+
+		return input;
+	}
+
+	function renameBook(id, labelNode, className) {
+		var was = labelNode.textContent;
+		var tile = labelNode.closest ? labelNode.closest('.kv04-book') : null;
+		if (tile) tile.classList.add('is-editing');
+
+		editInPlace(labelNode, was, className, function (title) {
+			if (tile) tile.classList.remove('is-editing');
+			if (title === null) return;
+			title = title.trim();
+			if (title === '' || title === was) return;
+
+			post({ action: 'book_rename', book: id, title: title }).then(function (data) {
+				if (!data.ok) { alert(data.error || 'Ошибка'); return; }
+				renderBooks(data.books || booksSnapshot(), currentBookId());
+			}).catch(function () { alert('Нет связи'); });
+		});
 	}
 
 	function switchBook(id) {
@@ -1394,9 +1403,9 @@ foreach ($kv04Books as $kv04Book)
 	if (booksAdd) {
 		booksAdd.addEventListener('click', function () {
 			var tile = buildBookTile({ id: 0, title: '' }, false);
-			tile.classList.add('is-new');
+			tile.classList.add('is-new', 'is-editing');
 			booksList.appendChild(tile);
-			editTitle(tile, '', function (title) {
+			editInPlace(tile.querySelector('.kv04-book__open'), '', 'kv04-book__input', function (title) {
 				if (title === null || !title.trim()) { tile.remove(); syncBooksLimit(); return; }
 				post({ action: 'book_create', title: title }).then(function (data) {
 					if (!data.ok) { tile.remove(); syncBooksLimit(); alert(data.error || 'Ошибка'); return; }
@@ -1411,18 +1420,6 @@ foreach ($kv04Books as $kv04Book)
 			var tile = e.target.closest('.kv04-book');
 			if (!tile || tile.classList.contains('is-editing')) return;
 			var id = parseInt(tile.getAttribute('data-book'), 10);
-
-			if (e.target.closest('[data-book-rename]')) {
-				var was = tile.querySelector('.kv04-book__open').textContent;
-				editTitle(tile, was, function (title) {
-					if (title === null || title.trim() === was) { renderBooks(booksSnapshot(), currentBookId()); return; }
-					post({ action: 'book_rename', book: id, title: title }).then(function (data) {
-						if (!data.ok) { alert(data.error || 'Ошибка'); }
-						renderBooks((data.books) || booksSnapshot(), currentBookId());
-					}).catch(function () { alert('Нет связи'); renderBooks(booksSnapshot(), currentBookId()); });
-				});
-				return;
-			}
 
 			if (e.target.closest('[data-book-delete]')) {
 				post({ action: 'book_delete', book: id }).then(function (data) {
@@ -1443,7 +1440,23 @@ foreach ($kv04Books as $kv04Book)
 				return;
 			}
 
-			if (e.target.closest('[data-book-open]')) switchBook(id);
+			if (!e.target.closest('[data-book-open]')) return;
+
+			// Клик по открытому дневнику переключать нечего — значит правим
+			// заголовок. По чужому — переходим в него.
+			if (id === currentBookId()) {
+				renameBook(id, tile.querySelector('.kv04-book__open'), 'kv04-book__input');
+			} else {
+				switchBook(id);
+			}
+		});
+	}
+
+	// Заголовок в шапке ленты правится тем же кликом.
+	if (currentTitle) {
+		currentTitle.addEventListener('click', function () {
+			var id = currentBookId();
+			if (id > 0) renameBook(id, currentTitle, 'kv04-feed__title-input');
 		});
 	}
 
