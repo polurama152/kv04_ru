@@ -14,8 +14,8 @@
 
 | № | Файл | Статус | Суть |
 |---|------|--------|------|
-| 0001 | [0001-homepage-private-diary.md](0001-homepage-private-diary.md) | done | Главная: личный дневник по PIN вместо витрины |
-| 0002 | [0002-perf-and-hardening.md](0002-perf-and-hardening.md) | in-progress | Версионирование, быстрый путь `Installer::ensure()`, реестр долга по скорости и безопасности |
+| 0001 | [0001-homepage-private-diary.md](0001-homepage-private-diary.md) | done | Главная: дневник вместо витрины. Почта — идентичность, пин — секрет внутри неё; несколько дневников, корзина на 7 дней |
+| 0002 | [0002-perf-and-hardening.md](0002-perf-and-hardening.md) | in-progress | Версионирование, быстрый путь `Installer::ensure()`, реестр долга по скорости и безопасности с замерами |
 
 Архитектура и карта файлов — [docs/ONBOARDING.md](../ONBOARDING.md). UX и POST-контракт — в спеке `0001`.
 

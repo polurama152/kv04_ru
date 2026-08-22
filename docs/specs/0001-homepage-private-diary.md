@@ -1,7 +1,7 @@
 # 0001 — Личный дневник на главной
 
 - Статус: `done`
-- Дата: 2026-08-21
+- Дата: 2026-08-21, обновлено 2026-08-23
 - Модуль: `kv04.diary`
 
 ## Зачем
@@ -10,68 +10,95 @@
 
 ## Решение
 
-- **Идентичность = 4-значный PIN.** «Войти» / «Создать дневник» (PIN дважды). Занятый PIN → «такой пин занят».
-- **Лок как в банке:** 3 неверных входа → 24 часа. Неизвестный PIN — счётчик по IP (`Option` `ipfail_*`).
-- **Сессия 10 часов** с момента входа, без idle-timeout. Cookie `KV04_DIARY` (HMAC + pepper) + PHP-сессия.
-- **Заметки только свои:** AJAX CRUD, текст без заголовка, код в `<pre><code>` + Highlight.js, медиа jpg/png/gif/webp/mp4/webm, вставка из буфера, несколько файлов за раз.
-- Гость видит только PIN-пад.
-- PIN: HMAC-SHA256(PIN, pepper), не `password_hash` (нужен lookup). Защита — лок по записи PIN и по IP.
+- **Идентичность = почта, пин = секрет внутри неё.** Почта отвечает на вопрос «чей это дневник», пин — «ты ли это». Раньше идентичностью был сам пин, из-за чего четыре цифры были общим пространством на всех: занятый пин сообщал о чужом существовании, а перебор шёл против всех дневников сразу.
+- **Кнопки «Войти» нет.** Пин открывает дневник сам, как только набран: отдельное подтверждение ничего не решало, а лишний шаг стоил каждому входу.
+- **Знакомое устройство помнит, чей пин проверять.** Cookie `KV04_DIARY_DEVICE` живёт год и переживает выход; сама по себе доступа не даёт, только подсказывает аккаунт, поэтому на своём телефоне достаточно пина, а почта нужна на новом устройстве.
+- **Лестница блокировок вместо одной ступени:** 3 ошибки → 5 минут, 6 → 30 минут, 9 → час, 12 → сутки, дальше каждая ошибка снова стоит суток. Счётчик забывается через сутки без ошибок. Отдельные лестницы на аккаунт и на IP.
+- **Несколько дневников под одним пином:** до пятидесяти, плитками слева, лента показывает открытый.
+- **Удаление в корзину на 7 дней**, без подтверждения: возврат по клику дешевле вопроса «вы уверены».
+- **Заметки только свои:** AJAX CRUD, текст без заголовка, код в `<pre><code>` + highlight.js, медиа jpg/png/gif/webp/mp4/webm, вставка из буфера, несколько файлов за раз.
+- Гость видит только пин-пад.
+- Пин: HMAC-SHA256(пин, pepper), не `password_hash` — нужен поиск по значению. Защита — лестница блокировок на аккаунт и IP.
 
 ## Реализованный UX
 
-- Оболочка: `prolog_before.php` + свой HTML; **не** `bitrix/header.php` / `footer.php`. Без хедера/футера/сайдбара магазина.
+- Оболочка: `prolog_before.php` + свой HTML; **не** `bitrix/header.php` / `footer.php`. Без хедера, футера и сайдбара магазина.
 - Тема Telegram dark: `local/modules/kv04.diary/assets/diary-theme.css`. Фон `#0e1621`, акцент `#2AABEE`. Контейнер до ~1040px на desktop.
-- PIN: экранный pad + клавиатура (0–9, Backspace, Enter, Escape).
-- Лента: клик по пузырю = «Изменить»; Ctrl+Enter = «Готово» (composer и edit); Esc = диалог «Сохранить изменения?» (Enter = Да, стрелки = Да/Нет).
-- Медиа: сетка превью, lightbox (повторный клик сворачивает), × удаление, «Прикрепить» в edit, `multiple` на file input.
-- Код: Highlight.js `atom-one-dark`; sanitize сохраняет `<?`, `<?php`, `$a < $b`.
+- Вход: экранный пад + клавиатура (0–9, Backspace, Enter, Escape). На знакомом устройстве — только пин, на новом — ещё поле почты.
+- Лента: клик по пузырю = правка на месте, «что вижу, то и получаю»; Ctrl+Enter = «Готово»; Esc = диалог «Сохранить изменения?» (Enter = Да, стрелки = Да/Нет).
+- Дневники: плитки слева, на телефоне — выдвижная панель. Заголовок правится по клику — и на открытой плитке, и в шапке ленты; Enter сохраняет, Escape отменяет, потеря фокуса сохраняет. Крестик удаляет дневник.
+- Корзина: заметки, отдельные файлы и блоки кода возвращаются по клику; через 7 дней стираются насовсем.
+- Медиа: сетка превью, lightbox (повторный клик сворачивает), × удаление, «Прикрепить» в правке, `multiple` у поля файла.
+- Ссылки в заметках кликабельны, включая голые домены вида `polurama.ru`.
+- Код: highlight.js `atom-one-dark`, файлы лежат в модуле (`assets/highlight/`), не на cdnjs. Sanitize сохраняет `<?`, `<?php`, `$a < $b`.
 
 ## Вне скоупа
 
 - Магазин, каталог, реклама на главной
-- Восстановление PIN, email, Bitrix-пользователь
+- Восстановление доступа письмом на почту, Bitrix-пользователь
 - Публичные / общие дневники
 - Выкладка на Маркетплейс (долг ниже)
 
 ## Контракт
 
-**Страница:** `/` (`public_html/index.php`) — PIN-пад или лента.
+**Страница:** `/` (`public_html/index.php`) — пин-пад или лента.
 
 **Компоненты:** `kv04:diary.pin`, `kv04:diary.feed` (`/local/components/kv04/`).
 
-**POST + `sessid`:**
+**POST + `sessid`, ответ JSON:**
 
 | action | Где | Тело |
 |--------|-----|------|
-| `login` / `create` | pin | `pin`; create — ещё подтверждение |
+| — (по умолчанию) | pin | `pin`, `email` — вход |
+| `create` | pin | `email`, `pin`, `pin_confirm` |
+| `forget_device` | pin | — забыть привязку браузера |
 | `logout` | pin, feed | — |
 | `add` | feed | `text`, `media[]` |
 | `edit` | feed | `id`, `text` |
-| `delete` | feed | `id` |
+| `delete` | feed | `id` — в корзину |
+| `restore` | feed | `id` — из корзины |
+| `delete_block` | feed | `id`, `index` — блок текста или кода |
+| `restore_fragment` | feed | `trash_id` — вернуть файл или блок |
 | `attach` | feed | `id`, `media[]` |
 | `detach_media` | feed | `id`, `file_id` |
+| `trash` | feed | — показать корзину |
+| `book_create` / `book_rename` / `book_delete` / `book_switch` | feed | `title`, `book` |
+| `attach_email` | feed | `email` — дописать почту старому дневнику |
 
-**HL** `Kv04DiaryKey` / `kv04_diary_keys`: `UF_PIN_HASH`, `UF_OWNER_ID`, `UF_FAILS`, `UF_LOCKED_UNTIL`.
+**HL** `Kv04DiaryKey` / `kv04_diary_keys`: `UF_PIN_HASH`, `UF_OWNER_ID`, `UF_EMAIL`, `UF_FAILS`, `UF_LOCKED_UNTIL`.
 
-**Инфоблок** тип `kv04`, код `diary`: `OWNER` (строка), `MEDIA` (файл, множественное). Гости `GROUP_ID` 2 = `W`.
+**Свои таблицы:**
 
-**Опции** `kv04.diary`: `pepper`, `hlblock_id`, `iblock_id`, `ipfail_*`.
+| Таблица | Зачем |
+|---------|-------|
+| `kv04_diary_attempts` | лестница блокировок; ключ хранится HMAC-ом, по дампу не восстановить ни IP, ни владельца |
+| `kv04_diary_books` | дневники владельца, до 50 |
+| `kv04_diary_trash` | обрывки заметок в корзине: отдельный файл или блок |
 
-**Сессия:** cookie `KV04_DIARY`, TTL 36000 с. Лента `CACHE_TYPE=N`.
+**Инфоблок** тип `kv04`, код `diary`: `OWNER` (строка), `BOOK` (номер дневника), `MEDIA` (файл, множественное), `DELETED_AT` (когда ушло в корзину). Удалённое — `ACTIVE = N`. Гости `GROUP_ID` 2 = `W`.
+
+**Опции** `kv04.diary`: `pepper`, `hlblock_id`, `iblock_id`, `schema_version`.
+
+**Схема данных:** версия 6. Поднимать при изменении структуры — `Installer::ensure()` один раз переприменит её на каждом сервере.
+
+**Сессия:** cookie `KV04_DIARY` (HMAC + pepper), TTL 36000 с; cookie `KV04_DIARY_DEVICE` — год; открытый дневник — в сессии `KV04_DIARY_BOOK`. Лента `CACHE_TYPE=N`.
 
 **Автозагрузка:** `load.php` → `kv04DiaryLoadModule()` → `boot.php` → **всегда** `include.php`. Автозагрузка с `module=null` и путями `/local/modules/...`.
 
 ## Технические ограничения
 
+- **PHP 8.1 и выше.** Ядро Bitrix на этом сайте содержит `enum` (`main/lib/Messenger/Config/WorkerRunMode.php`), и на 8.0 весь сайт отдаёт 500 ещё до нашего кода. Проверено 2026-08-22 переключением версии на площадке.
 - `epilog_after.php` не подключаем — конфликт с `main.broken.*` на сервере.
-- MEDIA: payload `[['VALUE' => id], …]`. На PHP 8.4 `SetPropertyValuesEx` с integer ID падает — запись через `NoteService::setMediaProperty()` в `b_iblock_element_prop_m*`.
+- MEDIA: payload `[['VALUE' => id], …]`. На PHP 8.4 `SetPropertyValuesEx` с integer ID падает — запись через `NoteService::setMediaProperty()` прямо в `b_iblock_element_prop_m*`, чтение оттуда же одним запросом на всю ленту.
 - `Html::sanitize()` изолирует `<pre>` до `strip_tags`; regex `on\w+=` к тексту кода не применять.
 - Заметки, сохранённые до фикса sanitize, могут содержать мусор `KV04PRE0` — только ручная правка.
 - AJAX «Нет связи» часто = HTTP 500 (HTML вместо JSON).
 
 ## Файлы
 
-- `local/modules/kv04.diary/` — `load.php`, `boot.php`, `include.php`, `lib/*`, `assets/diary-theme.css`, `install/`
+- `local/modules/kv04.diary/` — `load.php`, `boot.php`, `include.php`, `install/`
+- `local/modules/kv04.diary/lib/` — `installer.php`, `auth.php`, `pinservice.php`, `attemptlimiter.php`, `bookservice.php`, `noteservice.php`, `html.php`
+- `local/modules/kv04.diary/assets/` — `diary-theme.css`, `highlight/` (highlight.js 11.9.0, происхождение и суммы в `README.md` рядом)
 - `local/components/kv04/diary.pin/`, `diary.feed/`
 - `local/php_interface/init.php`
 - `index.php`
@@ -82,6 +109,6 @@
 - `lang/ru/`, `.description.php`, `.parameters.php`, `PARTNER_NAME` / `PARTNER_URI`.
 - У клиента: только установка + `includeModule`, без `boot.php`.
 - AJAX — контроллеры D7 (`.settings.php`), не POST в `class.php`.
-- PIN из 4 цифр: модель угроз или более длинный секрет.
-- Проверить, что `GROUP_ID 2 => W` не даёт читать/менять чужие элементы в публичке.
+- Пин из 4 цифр: теперь это секрет внутри аккаунта, а не общее пространство, но модель угроз всё равно записать.
+- Проверить, что `GROUP_ID 2 => W` не даёт читать и менять чужие элементы в публичке.
 - `options.php` и админ-страница модуля.

@@ -53,21 +53,26 @@ flowchart TD
 | `local/modules/kv04.diary/include.php` | require lib, autoload `null` + `/local/` пути |
 | `local/modules/kv04.diary/lib/installer.php` | HL + iblock + pepper |
 | `local/modules/kv04.diary/lib/auth.php` | Cookie `KV04_DIARY`, TTL 10 ч |
-| `local/modules/kv04.diary/lib/pinservice.php` | HMAC PIN, лок 3/24ч |
-| `local/modules/kv04.diary/lib/noteservice.php` | CRUD заметок, MEDIA |
+| `local/modules/kv04.diary/lib/pinservice.php` | Почта как идентичность, HMAC пина |
+| `local/modules/kv04.diary/lib/attemptlimiter.php` | Лестница блокировок, своя таблица |
+| `local/modules/kv04.diary/lib/bookservice.php` | Дневники владельца, до 50 |
+| `local/modules/kv04.diary/lib/noteservice.php` | CRUD заметок, MEDIA, корзина |
 | `local/modules/kv04.diary/lib/html.php` | sanitize, изоляция `<pre>` |
 | `local/modules/kv04.diary/assets/diary-theme.css` | Общая тёмная тема |
+| `local/modules/kv04.diary/assets/highlight/` | highlight.js 11.9.0, свой, не cdnjs |
 | `local/components/kv04/diary.pin/` | Вход / создание |
 | `local/components/kv04/diary.feed/` | Лента, AJAX |
 | `local/php_interface/init.php` | Подключает `load.php` |
 
 ## Данные
 
-- HL `Kv04DiaryKey` / таблица `kv04_diary_keys`: `UF_PIN_HASH`, `UF_OWNER_ID`, `UF_FAILS`, `UF_LOCKED_UNTIL`
-- Инфоблок тип `kv04`, код `diary`: `OWNER`, `MEDIA` (файл, multiple)
-- Option модуля `kv04.diary`: `pepper`, `hlblock_id`, `iblock_id`, `ipfail_*`
+- HL `Kv04DiaryKey` / таблица `kv04_diary_keys`: `UF_PIN_HASH`, `UF_OWNER_ID`, `UF_EMAIL`, `UF_FAILS`, `UF_LOCKED_UNTIL`
+- Свои таблицы: `kv04_diary_attempts` (лестница блокировок), `kv04_diary_books` (дневники), `kv04_diary_trash` (обрывки в корзине)
+- Инфоблок тип `kv04`, код `diary`: `OWNER`, `BOOK`, `MEDIA` (файл, multiple), `DELETED_AT`. Удалённое — `ACTIVE = N`
+- Option модуля `kv04.diary`: `pepper`, `hlblock_id`, `iblock_id`, `schema_version` (сейчас 6)
+- Cookie: `KV04_DIARY` (сессия, 10 ч), `KV04_DIARY_DEVICE` (привязка браузера, год)
 
-POST feed: `add`, `edit`, `delete`, `attach`, `detach_media`, `logout`. Pin: `login`, `create`, `logout`. Всегда `check_bitrix_sessid()`.
+POST feed: `add`, `edit`, `delete`, `restore`, `delete_block`, `restore_fragment`, `attach`, `detach_media`, `trash`, `book_create`, `book_rename`, `book_delete`, `book_switch`, `attach_email`, `logout`. Pin: вход без action, `create`, `forget_device`, `logout`. Всегда `check_bitrix_sessid()`.
 
 ## Deploy и проверка
 
@@ -93,4 +98,4 @@ POST feed: `add`, `edit`, `delete`, `attach`, `detach_media`, `logout`. Pin: `lo
 
 ## Известные ловушки
 
-Подробно: `.serena/memories/known_caveats.md`. Кратко: autoload в `/bitrix/` без `include.php`; PHP 8.4 и `SetPropertyValuesEx` для MEDIA; `strip_tags`/`on\w+=` ломают PHP-код в заметках; `epilog_after.php` не подключать.
+Подробно: `.serena/memories/known_caveats.md`. Кратко: сайту нужен **PHP 8.1+** — ядро содержит `enum`, на 8.0 весь сайт отдаёт 500; autoload в `/bitrix/` без `include.php`; PHP 8.4 и `SetPropertyValuesEx` для MEDIA; `strip_tags`/`on\w+=` ломают PHP-код в заметках; `epilog_after.php` не подключать.
