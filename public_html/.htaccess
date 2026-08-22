@@ -7,6 +7,10 @@ ErrorDocument 404 /404.php
 <IfModule mod_rewrite.c>
 	Options +FollowSymLinks
 	RewriteEngine On
+	# Установщик Bitrix и отладочные скрипты уже приезжали в корень с
+	# восстановлением из архива 27.06.2026: bitrixsetup.php — это чужой путь
+	# записи на сервер, test-скрипты печатают имя БД. Вернутся — мёртвыми.
+	RewriteRule ^(bitrixsetup|test|check_tables|check_encoding|bitrix_test|enum_test)\.php$ - [F]
 	RewriteCond %{REQUEST_FILENAME} !-f
 	RewriteCond %{REQUEST_FILENAME} !-l
 	RewriteCond %{REQUEST_FILENAME} !-d
