@@ -1,12 +1,36 @@
 php_value memory_limit "512M"
 php_value max_execution_time 300
 
+# Сессии — в свою папку, вне общего /var/tmp. Там 684 тысячи файлов
+# сессий всех клиентов машины: содержимое закрыто правами 0600, но имена
+# файлов видны всем, а имя файла и есть идентификатор сессии — весь
+# секрет целиком. Дневник пускает по сессии (Auth::getOwnerId сначала
+# смотрит $_SESSION), поэтому чужой взгляд на список файлов равен ключу.
+# Здесь, а не в .user.ini: PHP на площадке — модуль Apache, .user.ini
+# читают только CGI и FPM, и там эти строки молча ничего не делали.
+php_value session.save_path "/home/i/infopolura/sessions"
+
+# Идентификатор сессии назначает сервер, а не клиент.
+php_flag session.use_strict_mode on
+
+# Cookie сессии — только по https и только серверу. Secure стало можно
+# после редиректа выше: до него флаг отрезал бы тех, кто пришёл по http.
+php_flag session.cookie_secure on
+php_flag session.cookie_httponly on
+php_value session.cookie_samesite "Lax"
+
 Options -Indexes
 ErrorDocument 404 /404.php
 
 <IfModule mod_rewrite.c>
 	Options +FollowSymLinks
 	RewriteEngine On
+	# Весь сайт по https. nginx терминирует TLS и ходит в Apache обычным
+	# http, поэтому %{HTTPS} здесь всегда пуст, а REQUEST_SCHEME всегда
+	# http: проверять их значило бы зациклить редирект. Честный признак
+	# один — заголовок от прокси.
+	RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+	RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 	# Установщик Bitrix и отладочные скрипты уже приезжали в корень с
 	# восстановлением из архива 27.06.2026: bitrixsetup.php — это чужой путь
 	# записи на сервер, test-скрипты печатают имя БД. Вернутся — мёртвыми.

@@ -86,6 +86,7 @@ class Auth
 	{
 		$cookie = new Cookie($name, '', time() - 3600);
 		$cookie->setHttpOnly(true);
+		$cookie->setSecure(true);
 		$cookie->setPath('/');
 		Application::getInstance()->getContext()->getResponse()->addCookie($cookie);
 		if (!headers_sent())
@@ -94,6 +95,7 @@ class Auth
 				'expires' => time() - 3600,
 				'path' => '/',
 				'httponly' => true,
+				'secure' => true,
 				'samesite' => 'Lax',
 			]);
 		}
@@ -104,6 +106,9 @@ class Auth
 		$value = self::sign($ownerId, $expires);
 		$cookie = new Cookie($name, $value, $expires);
 		$cookie->setHttpOnly(true);
+		// Только по https: сайт весь на https, а эта cookie сама по себе
+		// открывает записи — getOwnerId() поднимает по ней сессию заново.
+		$cookie->setSecure(true);
 		$cookie->setPath('/');
 		Application::getInstance()->getContext()->getResponse()->addCookie($cookie);
 		if (!headers_sent())
@@ -112,6 +117,7 @@ class Auth
 				'expires' => $expires,
 				'path' => '/',
 				'httponly' => true,
+				'secure' => true,
 				'samesite' => 'Lax',
 			]);
 		}
