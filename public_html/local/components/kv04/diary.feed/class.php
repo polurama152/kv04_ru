@@ -6,6 +6,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 
 use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
+use Kv04\Diary\BookService;
 use Kv04\Diary\NoteService;
 use Kv04\Diary\PinService;
 
@@ -47,7 +48,14 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		{
 			NoteService::purgeExpired();
 		}
-		$this->arResult['ITEMS'] = NoteService::list($ownerId);
+		// Дневников под одним пином может быть несколько; лента показывает
+		// открытый. currentId() сам заводит первый и подбирает в него старые
+		// заметки, если их ещё не разложили.
+		$currentBook = BookService::currentId($ownerId);
+		$this->arResult['BOOKS'] = BookService::list($ownerId);
+		$this->arResult['CURRENT_BOOK'] = $currentBook;
+		$this->arResult['MAX_BOOKS'] = BookService::MAX_BOOKS;
+		$this->arResult['ITEMS'] = NoteService::list($ownerId, $currentBook);
 		$this->includeComponentTemplate();
 	}
 
@@ -58,6 +66,39 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		{
 			Auth::clear();
 			$this->json(['ok' => true, 'reload' => true]);
+			return;
+		}
+
+		if ($action === 'book_switch')
+		{
+			$bookId = (int)$this->request->getPost('book');
+			if (!BookService::setCurrent($ownerId, $bookId))
+			{
+				$this->json(['ok' => false, 'error' => 'Дневник не найден']);
+				return;
+			}
+			// Отдаём сразу ленту нового дневника: перезагружать страницу
+			// ради смены вкладки незачем.
+			$this->json([
+				'ok' => true,
+				'book' => $bookId,
+				'items' => NoteService::list($ownerId, $bookId),
+			]);
+			return;
+		}
+		if ($action === 'book_create')
+		{
+			$this->json(BookService::create($ownerId, (string)$this->request->getPost('title')));
+			return;
+		}
+		if ($action === 'book_rename')
+		{
+			$this->json(BookService::rename($ownerId, (int)$this->request->getPost('book'), (string)$this->request->getPost('title')));
+			return;
+		}
+		if ($action === 'book_delete')
+		{
+			$this->json(BookService::delete($ownerId, (int)$this->request->getPost('book')));
 			return;
 		}
 
@@ -81,7 +122,12 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		if ($action === 'add')
 		{
 			$files = $this->normalizeFiles($_FILES['media'] ?? []);
-			$result = NoteService::add($ownerId, (string)$this->request->getPost('text'), $files);
+			$result = NoteService::add(
+				$ownerId,
+				(string)$this->request->getPost('text'),
+				$files,
+				BookService::currentId($ownerId)
+			);
 			// Перечитывать всю ленту не нужно: add() уже вернул готовый
 			// элемент, фронт дорисовывает его сам.
 			$this->json($result);

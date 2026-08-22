@@ -116,9 +116,45 @@ if (!function_exists('kv04DiaryRenderItems'))
 	}
 }
 ?>
-<div class="kv04-feed" id="kv04-feed">
+<?php
+$kv04Books = $arResult['BOOKS'] ?? [];
+$kv04CurrentBook = (int)($arResult['CURRENT_BOOK'] ?? 0);
+$kv04CurrentTitle = 'Мой дневник';
+foreach ($kv04Books as $kv04Book)
+{
+	if ((int)$kv04Book['id'] === $kv04CurrentBook)
+	{
+		$kv04CurrentTitle = (string)$kv04Book['title'];
+	}
+}
+?>
+<div class="kv04-workspace" id="kv04-workspace">
+
+<aside class="kv04-books" data-books aria-label="Дневники">
+	<div class="kv04-books__head">
+		<span class="kv04-books__title">Дневники</span>
+		<button type="button" class="kv04-books__close" data-books-close aria-label="Закрыть список">&times;</button>
+	</div>
+	<div class="kv04-books__list" data-books-list>
+		<?php foreach ($kv04Books as $kv04Book): ?>
+			<?php $kv04IsCurrent = (int)$kv04Book['id'] === $kv04CurrentBook; ?>
+			<div class="kv04-book<?=$kv04IsCurrent ? ' is-current' : ''?>" data-book="<?=(int)$kv04Book['id']?>">
+				<button type="button" class="kv04-book__open" data-book-open title="<?=htmlspecialcharsbx($kv04Book['title'])?>"><?=htmlspecialcharsbx($kv04Book['title'])?></button>
+				<button type="button" class="kv04-book__act" data-book-rename aria-label="Переименовать" title="Переименовать">&#9998;</button>
+				<button type="button" class="kv04-book__act kv04-book__act--danger" data-book-delete aria-label="Удалить дневник" title="Удалить дневник">&times;</button>
+			</div>
+		<?php endforeach; ?>
+	</div>
+	<button type="button" class="kv04-books__add" data-book-add>+ Новый дневник</button>
+	<p class="kv04-books__limit" data-books-limit hidden></p>
+</aside>
+
+<div class="kv04-books__backdrop" data-books-backdrop hidden></div>
+
+<div class="kv04-feed" id="kv04-feed" data-max-books="<?=(int)($arResult['MAX_BOOKS'] ?? 50)?>">
 	<div class="kv04-feed__head">
-		<h1>Мой дневник</h1>
+		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm kv04-feed__books" data-books-open>Дневники</button>
+		<h1 data-current-title><?=htmlspecialcharsbx($kv04CurrentTitle)?></h1>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-trash-open>Корзина</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-logout>Выйти</button>
 	</div>
@@ -172,6 +208,8 @@ if (!function_exists('kv04DiaryRenderItems'))
 		<?php kv04DiaryRenderItems($arResult['ITEMS']); ?>
 	</div>
 </div>
+
+</div><!-- /kv04-workspace -->
 
 <div class="kv04-lightbox" id="kv04-lightbox" aria-hidden="true">
 	<div class="kv04-lightbox__backdrop" data-lightbox-close tabindex="-1"></div>
@@ -1214,6 +1252,224 @@ if (!function_exists('kv04DiaryRenderItems'))
 		}
 	});
 
+	// --- Дневники ----------------------------------------------------------
+	//
+	// Под одним пином живёт до пятидесяти дневников. Плитки слева на широком
+	// экране стоят постоянно, на телефоне выезжают поверх ленты: узкий экран
+	// нужен ленте целиком, там код и картинки.
+
+	var workspace = document.getElementById('kv04-workspace');
+	var booksPanel = root.querySelector('[data-books]') || document.querySelector('[data-books]');
+	var booksList = document.querySelector('[data-books-list]');
+	var booksBackdrop = document.querySelector('[data-books-backdrop]');
+	var booksAdd = document.querySelector('[data-book-add]');
+	var booksLimit = document.querySelector('[data-books-limit]');
+	var currentTitle = root.querySelector('[data-current-title]');
+	var maxBooks = parseInt(root.getAttribute('data-max-books'), 10) || 50;
+
+	function openBooks() {
+		if (!workspace) return;
+		workspace.classList.add('is-books-open');
+		if (booksBackdrop) booksBackdrop.hidden = false;
+	}
+
+	function closeBooks() {
+		if (!workspace) return;
+		workspace.classList.remove('is-books-open');
+		if (booksBackdrop) booksBackdrop.hidden = true;
+	}
+
+	function currentBookId() {
+		var tile = booksList && booksList.querySelector('.kv04-book.is-current');
+		return tile ? parseInt(tile.getAttribute('data-book'), 10) : 0;
+	}
+
+	function syncBooksLimit() {
+		if (!booksAdd) return;
+		var count = booksList ? booksList.querySelectorAll('.kv04-book').length : 0;
+		var full = count >= maxBooks;
+		booksAdd.hidden = full;
+		if (booksLimit) {
+			booksLimit.hidden = !full;
+			booksLimit.textContent = full ? 'Больше ' + maxBooks + ' дневников не поместится' : '';
+		}
+	}
+
+	function buildBookTile(book, isCurrent) {
+		var tile = document.createElement('div');
+		tile.className = 'kv04-book' + (isCurrent ? ' is-current' : '');
+		tile.setAttribute('data-book', String(book.id));
+
+		var open = document.createElement('button');
+		open.type = 'button';
+		open.className = 'kv04-book__open';
+		open.setAttribute('data-book-open', '');
+		open.textContent = book.title;
+		open.title = book.title;
+		tile.appendChild(open);
+
+		var rename = document.createElement('button');
+		rename.type = 'button';
+		rename.className = 'kv04-book__act';
+		rename.setAttribute('data-book-rename', '');
+		rename.setAttribute('aria-label', 'Переименовать');
+		rename.title = 'Переименовать';
+		rename.innerHTML = '&#9998;';
+		tile.appendChild(rename);
+
+		var remove = document.createElement('button');
+		remove.type = 'button';
+		remove.className = 'kv04-book__act kv04-book__act--danger';
+		remove.setAttribute('data-book-delete', '');
+		remove.setAttribute('aria-label', 'Удалить дневник');
+		remove.title = 'Удалить дневник';
+		remove.innerHTML = '&times;';
+		tile.appendChild(remove);
+
+		return tile;
+	}
+
+	function renderBooks(books, currentId) {
+		if (!booksList) return;
+		booksList.innerHTML = '';
+		books.forEach(function (book) {
+			booksList.appendChild(buildBookTile(book, book.id === currentId));
+			if (book.id === currentId && currentTitle) currentTitle.textContent = book.title;
+		});
+		syncBooksLimit();
+	}
+
+	// Заголовок правится прямо на плитке: отдельное окно ради одной строки —
+	// лишний шаг. Enter сохраняет, Escape отменяет.
+	function editTitle(tile, initial, onDone) {
+		var label = tile.querySelector('.kv04-book__open');
+		if (!label) return;
+		var input = document.createElement('input');
+		input.type = 'text';
+		input.className = 'kv04-book__input';
+		input.value = initial;
+		input.maxLength = 120;
+		label.replaceWith(input);
+		tile.classList.add('is-editing');
+		input.focus();
+		input.select();
+
+		var finished = false;
+		function finish(save) {
+			if (finished) return;
+			finished = true;
+			tile.classList.remove('is-editing');
+			onDone(save ? input.value : null, input);
+		}
+
+		input.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+			else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+		});
+		input.addEventListener('blur', function () { finish(true); });
+	}
+
+	function switchBook(id) {
+		if (id === currentBookId()) { closeBooks(); return; }
+		post({ action: 'book_switch', book: id }).then(function (data) {
+			if (!data.ok) { alert(data.error || 'Ошибка'); return; }
+			// Лента приходит готовой — перезагружать страницу ради смены
+			// дневника незачем.
+			list.innerHTML = '';
+			(data.items || []).forEach(function (item) {
+				list.appendChild(createNoteElement(item));
+			});
+			highlight(list);
+			linkify(list);
+
+			booksList.querySelectorAll('.kv04-book').forEach(function (tile) {
+				var isCurrent = parseInt(tile.getAttribute('data-book'), 10) === id;
+				tile.classList.toggle('is-current', isCurrent);
+				if (isCurrent && currentTitle) {
+					currentTitle.textContent = tile.querySelector('.kv04-book__open').textContent;
+				}
+			});
+			closeBooks();
+		}).catch(function () { alert('Нет связи'); });
+	}
+
+	if (booksAdd) {
+		booksAdd.addEventListener('click', function () {
+			var tile = buildBookTile({ id: 0, title: '' }, false);
+			tile.classList.add('is-new');
+			booksList.appendChild(tile);
+			editTitle(tile, '', function (title) {
+				if (title === null || !title.trim()) { tile.remove(); syncBooksLimit(); return; }
+				post({ action: 'book_create', title: title }).then(function (data) {
+					if (!data.ok) { tile.remove(); syncBooksLimit(); alert(data.error || 'Ошибка'); return; }
+					renderBooks(data.books || [], currentBookId());
+				}).catch(function () { tile.remove(); syncBooksLimit(); alert('Нет связи'); });
+			});
+		});
+	}
+
+	if (booksList) {
+		booksList.addEventListener('click', function (e) {
+			var tile = e.target.closest('.kv04-book');
+			if (!tile || tile.classList.contains('is-editing')) return;
+			var id = parseInt(tile.getAttribute('data-book'), 10);
+
+			if (e.target.closest('[data-book-rename]')) {
+				var was = tile.querySelector('.kv04-book__open').textContent;
+				editTitle(tile, was, function (title) {
+					if (title === null || title.trim() === was) { renderBooks(booksSnapshot(), currentBookId()); return; }
+					post({ action: 'book_rename', book: id, title: title }).then(function (data) {
+						if (!data.ok) { alert(data.error || 'Ошибка'); }
+						renderBooks((data.books) || booksSnapshot(), currentBookId());
+					}).catch(function () { alert('Нет связи'); renderBooks(booksSnapshot(), currentBookId()); });
+				});
+				return;
+			}
+
+			if (e.target.closest('[data-book-delete]')) {
+				post({ action: 'book_delete', book: id }).then(function (data) {
+					if (!data.ok) { alert(data.error || 'Ошибка'); return; }
+					renderBooks(data.books || [], data.current || 0);
+					if (data.moved) {
+						// Подпись честная: сам дневник не вернуть, но его заметки
+						// лежат в корзине и достаются оттуда поштучно — каждая
+						// ложится в открытый сейчас дневник.
+						showUndo('Дневник удалён, заметок в корзине: ' + data.moved, data.trash_days || 7, function () {
+							if (trashBox) trashBox.hidden = true;
+							openTrash();
+							return true;
+						}, 'Открыть корзину');
+					}
+					if (data.current) switchBook(data.current);
+				}).catch(function () { alert('Нет связи'); });
+				return;
+			}
+
+			if (e.target.closest('[data-book-open]')) switchBook(id);
+		});
+	}
+
+	// Список плиток на момент вызова — чтобы вернуть подпись, если правку
+	// заголовка отменили.
+	function booksSnapshot() {
+		if (!booksList) return [];
+		return [].map.call(booksList.querySelectorAll('.kv04-book'), function (tile) {
+			var label = tile.querySelector('.kv04-book__open');
+			return {
+				id: parseInt(tile.getAttribute('data-book'), 10),
+				title: label ? label.textContent : ''
+			};
+		}).filter(function (b) { return b.id > 0; });
+	}
+
+	var booksOpenBtn = root.querySelector('[data-books-open]');
+	if (booksOpenBtn) booksOpenBtn.addEventListener('click', openBooks);
+	var booksCloseBtn = document.querySelector('[data-books-close]');
+	if (booksCloseBtn) booksCloseBtn.addEventListener('click', closeBooks);
+	if (booksBackdrop) booksBackdrop.addEventListener('click', closeBooks);
+
+	syncBooksLimit();
+
 	// --- Корзина -----------------------------------------------------------
 
 	var trashBox = root.querySelector('[data-trash]');
@@ -1271,7 +1527,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 
 	// Подтверждения перед удалением больше нет, поэтому возврат предлагаем
 	// сразу после действия — это заметнее и быстрее, чем идти в корзину.
-	function showUndo(message, days, onRestore) {
+	function showUndo(message, days, onRestore, actionLabel) {
 		var bar = document.createElement('div');
 		bar.className = 'kv04-undo';
 
@@ -1282,7 +1538,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 		var back = document.createElement('button');
 		back.type = 'button';
 		back.className = 'kv04-btn kv04-btn--ghost kv04-btn--sm';
-		back.textContent = 'Вернуть';
+		back.textContent = actionLabel || 'Вернуть';
 		bar.appendChild(back);
 
 		list.parentNode.insertBefore(bar, list);

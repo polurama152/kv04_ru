@@ -44,19 +44,25 @@ class NoteService
 		return (int)Option::get(Installer::MODULE_ID, 'iblock_id', '0');
 	}
 
-	public static function list(string $ownerId): array
+	public static function list(string $ownerId, int $bookId = 0): array
 	{
 		self::requireIblock();
+
+		$filter = [
+			'IBLOCK_ID' => self::iblockId(),
+			'ACTIVE' => 'Y',
+			'PROPERTY_OWNER' => $ownerId,
+			'CHECK_PERMISSIONS' => 'N',
+		];
+		if ($bookId > 0)
+		{
+			$filter['PROPERTY_BOOK'] = $bookId;
+		}
 
 		$items = [];
 		$res = CIBlockElement::GetList(
 			['ID' => 'DESC'],
-			[
-				'IBLOCK_ID' => self::iblockId(),
-				'ACTIVE' => 'Y',
-				'PROPERTY_OWNER' => $ownerId,
-				'CHECK_PERMISSIONS' => 'N',
-			],
+			$filter,
 			false,
 			['nTopCount' => 100],
 			['ID', 'NAME', 'DETAIL_TEXT', 'DATE_CREATE']
@@ -107,7 +113,7 @@ class NoteService
 		];
 	}
 
-	public static function add(string $ownerId, string $text, array $files = []): array
+	public static function add(string $ownerId, string $text, array $files = [], int $bookId = 0): array
 	{
 		self::requireIblock();
 
@@ -119,6 +125,10 @@ class NoteService
 		}
 
 		$propertyValues = ['OWNER' => $ownerId];
+		if ($bookId > 0)
+		{
+			$propertyValues['BOOK'] = $bookId;
+		}
 		if ($mediaIds)
 		{
 			$propertyValues['MEDIA'] = self::mediaPropertyPayload($mediaIds);
@@ -203,7 +213,16 @@ class NoteService
 		{
 			return ['ok' => false, 'error' => $element->LAST_ERROR ?: 'Не удалось вернуть'];
 		}
-		CIBlockElement::SetPropertyValuesEx($id, self::iblockId(), ['DELETED_AT' => false]);
+
+		$fields = ['DELETED_AT' => false];
+		// Дневник заметки мог быть удалён, пока она лежала в корзине. Тогда
+		// возвращать её некуда: с чужим номером она не попадёт ни в одну
+		// ленту. Кладём в открытый сейчас.
+		if (!self::bookAlive($ownerId, $id))
+		{
+			$fields['BOOK'] = BookService::currentId($ownerId);
+		}
+		CIBlockElement::SetPropertyValuesEx($id, self::iblockId(), $fields);
 
 		return ['ok' => true, 'item' => self::get($ownerId, $id)];
 	}
@@ -341,6 +360,85 @@ class NoteService
 			'trash_id' => $trashId,
 			'trash_days' => (int)ceil(self::TRASH_TTL / 86400),
 		];
+	}
+
+	/**
+	 * Разовый перенос заметок, заведённых до появления нескольких дневников:
+	 * у них свойство BOOK пустое. Зовётся один раз на владельца, из
+	 * BookService::ensureDefault().
+	 *
+	 * @return int сколько заметок подобрано
+	 */
+	public static function adoptOrphanNotes(string $ownerId, int $bookId): int
+	{
+		self::requireIblock();
+
+		$iblockId = self::iblockId();
+		$res = CIBlockElement::GetList(
+			['ID' => 'ASC'],
+			[
+				'IBLOCK_ID' => $iblockId,
+				'PROPERTY_OWNER' => $ownerId,
+				'CHECK_PERMISSIONS' => 'N',
+			],
+			false,
+			false,
+			['ID', 'PROPERTY_BOOK']
+		);
+
+		$adopted = 0;
+		while ($row = $res->Fetch())
+		{
+			if ((int)($row['PROPERTY_BOOK_VALUE'] ?? 0) > 0)
+			{
+				continue;
+			}
+			CIBlockElement::SetPropertyValuesEx((int)$row['ID'], $iblockId, ['BOOK' => $bookId]);
+			$adopted++;
+		}
+
+		return $adopted;
+	}
+
+	/**
+	 * Отправляет в корзину все заметки дневника — при его удалении. Записи не
+	 * стираются: их можно вернуть те же семь дней, что и обычные.
+	 *
+	 * @return int сколько заметок уехало
+	 */
+	public static function trashBook(string $ownerId, int $bookId): int
+	{
+		self::requireIblock();
+
+		$iblockId = self::iblockId();
+		$res = CIBlockElement::GetList(
+			['ID' => 'ASC'],
+			[
+				'IBLOCK_ID' => $iblockId,
+				'ACTIVE' => 'Y',
+				'PROPERTY_OWNER' => $ownerId,
+				'PROPERTY_BOOK' => $bookId,
+				'CHECK_PERMISSIONS' => 'N',
+			],
+			false,
+			false,
+			['ID']
+		);
+
+		$moved = 0;
+		$element = new CIBlockElement();
+		while ($row = $res->Fetch())
+		{
+			$id = (int)$row['ID'];
+			if (!$element->Update($id, ['ACTIVE' => 'N']))
+			{
+				continue;
+			}
+			CIBlockElement::SetPropertyValuesEx($id, $iblockId, ['DELETED_AT' => time()]);
+			$moved++;
+		}
+
+		return $moved;
 	}
 
 	/**
@@ -599,6 +697,34 @@ class NoteService
 		}
 
 		return $fileIds;
+	}
+
+	/** Существует ли ещё дневник, к которому приписана заметка. */
+	private static function bookAlive(string $ownerId, int $elementId): bool
+	{
+		$res = CIBlockElement::GetList(
+			[],
+			['IBLOCK_ID' => self::iblockId(), 'ID' => $elementId, 'CHECK_PERMISSIONS' => 'N'],
+			false,
+			['nTopCount' => 1],
+			['ID', 'PROPERTY_BOOK']
+		);
+		$row = $res->Fetch();
+		$bookId = (int)($row['PROPERTY_BOOK_VALUE'] ?? 0);
+		if ($bookId <= 0)
+		{
+			return false;
+		}
+
+		foreach (BookService::list($ownerId) as $book)
+		{
+			if ($book['id'] === $bookId)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private static function owns(string $ownerId, int $id): bool

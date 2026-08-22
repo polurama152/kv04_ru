@@ -25,8 +25,9 @@ class Installer
 	 * своих таблиц — это заставит ensure() один раз переприменить схему на
 	 * каждом сервере. 2: таблица попыток входа. 3: UF_EMAIL.
 	 * 4: свойство DELETED_AT под корзину. 5: таблица обрывков заметок.
+	 * 6: таблица дневников и свойство BOOK у заметок.
 	 */
-	private const SCHEMA_VERSION = '5';
+	private const SCHEMA_VERSION = '6';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -67,6 +68,7 @@ class Installer
 		$iblockId = self::ensureIblock();
 		self::ensureAttemptsTable();
 		self::ensureTrashTable();
+		self::ensureBooksTable();
 
 		self::setOption('hlblock_id', (string)$hlId);
 		self::setOption('iblock_id', (string)$iblockId);
@@ -130,6 +132,31 @@ class Installer
 			. 'PRIMARY KEY (ID),'
 			. 'INDEX IX_KV04_DIARY_TRASH_OWNER (OWNER_ID, DELETED_AT),'
 			. 'INDEX IX_KV04_DIARY_TRASH_AGE (DELETED_AT)'
+			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
+	}
+
+	/**
+	 * Дневники одного владельца. Своя таблица, а не инфоблок: список читается
+	 * на каждый показ ленты, и лишний слой инфоблока тут ничего не даёт.
+	 */
+	private static function ensureBooksTable(): void
+	{
+		$connection = Application::getConnection();
+		if ($connection->isTableExists(BookService::TABLE))
+		{
+			return;
+		}
+
+		$connection->queryExecute(
+			'CREATE TABLE IF NOT EXISTS ' . BookService::TABLE . ' ('
+			. 'ID INT NOT NULL AUTO_INCREMENT,'
+			. 'OWNER_ID VARCHAR(40) NOT NULL,'
+			. 'TITLE VARCHAR(120) NOT NULL,'
+			. 'SORT INT NOT NULL DEFAULT 500,'
+			. 'CREATED_AT INT NOT NULL DEFAULT 0,'
+			. 'PRIMARY KEY (ID),'
+			. 'INDEX IX_KV04_DIARY_BOOKS_OWNER (OWNER_ID, SORT, ID)'
 			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
 		);
 	}
@@ -298,6 +325,9 @@ class Installer
 		// Время попадания в корзину. Заметка при удалении не стирается, а
 		// становится неактивной; отсюда же считается срок хранения.
 		self::ensureProperty($iblockId, 'DELETED_AT', 'Удалено', 'N', 'N');
+		// К какому дневнику относится заметка. Пусто у записей, заведённых
+		// до появления нескольких дневников — их подхватывает миграция.
+		self::ensureProperty($iblockId, 'BOOK', 'Дневник', 'N', 'N');
 
 		return $iblockId;
 	}
