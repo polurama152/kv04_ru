@@ -633,11 +633,46 @@ if (!function_exists('kv04DiaryRenderItems'))
 	// обычный текст, ссылки навешиваются при показе, а сериализатор при
 	// сохранении отдаёт обратно только их текст.
 
-	// Веб-адрес, либо почта. Голые домены вроде example.com намеренно не
-	// ловим: в дневнике полно имён файлов и версий (script.js, readme.md,
-	// 1.2.3), и они превращались бы в ссылки.
+	// Зоны, в которых голый домен без схемы считается адресом. Список ручной
+	// и намеренно неполный: зоны, совпадающие с расширениями файлов, сюда не
+	// входят. Иначе в дневнике с кодом readme.md (Молдова), build.sh (Святая
+	// Елена), main.py (Парагвай), lib.so (Сомали) и model.ai (Ангилья)
+	// превращались бы в ссылки. Дополнять по мере надобности.
+	var BARE_TLD = [
+		'ru', 'рф', 'su', 'by', 'kz', 'ua', 'uz', 'am', 'ge', 'az', 'kg', 'tj',
+		'com', 'net', 'org', 'info', 'biz', 'pro', 'name', 'edu', 'gov', 'int',
+		'online', 'site', 'store', 'shop', 'tech', 'space', 'website', 'cloud',
+		'app', 'dev', 'io', 'me', 'tv', 'cc', 'xyz', 'top', 'club', 'live',
+		'life', 'news', 'blog', 'wiki', 'help', 'link', 'click', 'email',
+		'host', 'press', 'agency', 'digital', 'studio', 'design', 'art', 'fun',
+		'games', 'guru', 'team', 'today', 'tools', 'works', 'world', 'zone'
+	].join('|');
+
+	// Буквы домена: латиница, цифры, дефис и кириллица — ради зоны рф.
+	var DOMAIN_CHAR = 'a-z0-9\\u0430-\\u044f\\u0451-';
+
+	// Порядок ветвей важен: почта раньше голого домена, иначе kto@to.ru
+	// распался бы на адрес и домен. Схема раньше www по той же причине.
 	function urlPattern() {
-		return /(?:https?:\/\/|www\.)[^\s<>"']+|(?:mailto:)?[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi;
+		return new RegExp(
+			'(?:https?:\\/\\/|www\\.)[^\\s<>"\']+'
+			+ '|(?:mailto:)?[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+'
+			+ '|(?:[' + DOMAIN_CHAR + ']+\\.)+(?:' + BARE_TLD + ')'
+			// Хвост зоны проверяем сами: \b в JS не знает кириллицы,
+			// и «полурама.рфы» прошло бы как ссылка.
+			+ '(?![' + DOMAIN_CHAR + '])'
+			+ '(?:[\\/?#][^\\s<>"\']*)?',
+			'gi'
+		);
+	}
+
+	function probePattern() {
+		return new RegExp(
+			'(?:https?:\\/\\/|www\\.)[^\\s<>"\']'
+			+ '|@[\\w-]+\\.[\\w-]'
+			+ '|\\.(?:' + BARE_TLD + ')(?![' + DOMAIN_CHAR + '])',
+			'i'
+		);
 	}
 
 	function linkifyTextNode(node) {
@@ -669,8 +704,11 @@ if (!function_exists('kv04DiaryRenderItems'))
 			// www и почту, поэтому javascript: сюда не попадёт.
 			if (url.indexOf('@') !== -1 && url.indexOf('//') === -1) {
 				link.href = 'mailto:' + url.replace(/^mailto:/i, '');
+			} else if (/^https?:\/\//i.test(url)) {
+				link.href = url;
 			} else {
-				link.href = /^www\./i.test(url) ? 'https://' + url : url;
+				// www.example.com и голый polurama.ru — схемы нет, добавляем.
+				link.href = 'https://' + url;
 			}
 			link.textContent = url;
 			link.target = '_blank';
@@ -691,7 +729,7 @@ if (!function_exists('kv04DiaryRenderItems'))
 	function linkify(root) {
 		if (!root || !root.querySelectorAll) return;
 
-		var probe = /(?:https?:\/\/|www\.)[^\s<>"']|@[\w-]+\.[\w-]/i;
+		var probe = probePattern();
 		var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
 			acceptNode: function (node) {
 				var parent = node.parentNode;
