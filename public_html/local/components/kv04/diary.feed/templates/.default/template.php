@@ -1243,8 +1243,17 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 	// файл открывается соседней вкладкой: копировать картинку в буфер умеют
 	// не все браузеры, а показать её — все.
 
+	// Системное меню — телефонная история. На десктопном Windows у Chrome
+	// navigator.share формально есть, но панель обмена открывается и тут же
+	// схлопывается: отдавать туда файл фактически некуда, и человек видит
+	// только мелькание. Поэтому меню зовём лишь при сенсорном вводе — там же,
+	// где показываем кнопки съёмки, — а на мыши сразу копируем.
+	var hasShareSheet = !!navigator.share
+		&& !!window.matchMedia
+		&& window.matchMedia('(pointer: coarse)').matches;
+
 	function canShareFiles(files) {
-		return !!(navigator.canShare && files.length && navigator.canShare({ files: files }));
+		return !!(hasShareSheet && navigator.canShare && files.length && navigator.canShare({ files: files }));
 	}
 
 	function copyOut(text) {
@@ -1263,7 +1272,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 	}
 
 	function shareOut(payload, fallbackText) {
-		if (!navigator.share) return copyOut(fallbackText);
+		if (!hasShareSheet) return copyOut(fallbackText);
 
 		return navigator.share(payload).then(function () {
 			setShotStatus('', false);
@@ -1318,6 +1327,11 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		if (!thumb) return;
 		var src = thumb.getAttribute('data-src');
 		var url = location.origin + src;
+
+		// Без системного меню забирать файл в память незачем: делиться им
+		// всё равно нечем, и адрес полезнее.
+		if (!hasShareSheet) { copyOut(url); return; }
+
 		setShotStatus('Готовлю файл…', false);
 
 		fileFromThumb(thumb).then(function (file) {
@@ -1333,6 +1347,13 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		if (!note) return;
 		var text = noteText(note);
 		var thumbs = note.querySelectorAll('.kv04-media-thumb');
+
+		if (!hasShareSheet) {
+			// На мыши уходит текст заметки, а у заметки без текста — адрес
+			// первого файла: хоть что-то, что можно вставить.
+			copyOut(text || (thumbs.length ? location.origin + thumbs[0].getAttribute('data-src') : ''));
+			return;
+		}
 
 		if (!thumbs.length) {
 			if (!text) { setShotStatus('В этой заметке нечем поделиться', true); return; }
@@ -1381,6 +1402,13 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 	var shareUrlField = shareBox ? shareBox.querySelector('[data-share-url]') : null;
 	var shareOpen = root.querySelector('[data-share-open]');
 	var shareUrl = '<?=CUtil::JSEscape((string)($arResult['SHARE_URL'] ?? ''))?>';
+
+	// Без системного меню кнопка «Отправить» делала бы то же, что соседняя
+	// «Скопировать», — убираем её, чтобы не обещать лишнего.
+	if (shareBox && !hasShareSheet) {
+		var sendBtn = shareBox.querySelector('[data-share-send]');
+		if (sendBtn) sendBtn.remove();
+	}
 
 	function showShareBox(url) {
 		shareUrl = url || '';
