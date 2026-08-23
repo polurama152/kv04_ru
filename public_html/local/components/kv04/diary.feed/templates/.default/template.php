@@ -198,6 +198,10 @@ foreach ($kv04Books as $kv04Book)
 				Фото
 				<input type="file" accept="image/*" capture="environment" hidden>
 			</label>
+			<label class="kv04-btn kv04-btn--muted kv04-btn--sm" data-clip title="Записать видео — в дневник ляжет короткое превью">
+				Видео
+				<input type="file" accept="video/*" capture="environment" hidden>
+			</label>
 			<button type="submit" class="kv04-btn kv04-btn--primary kv04-btn--sm" title="Готово (Ctrl+Enter)">Готово</button>
 		</div>
 		<div class="kv04-composer__preview" data-file-preview hidden></div>
@@ -941,8 +945,8 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		shotStatus.hidden = !text;
 	}
 
-	function setShotBusy(busy) {
-		if (shotLabel) shotLabel.classList.toggle('is-busy', !!busy);
+	function setBusy(label, busy) {
+		if (label) label.classList.toggle('is-busy', !!busy);
 	}
 
 	// Снимок с телефона бывает тяжелее серверного потолка, а iPhone изредка
@@ -953,7 +957,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		return file.size > SHOT_MAX_BYTES || !SHOT_SAFE_EXT.test(file.name || '');
 	}
 
-	function drawToJpeg(source, width, height) {
+	function drawToJpeg(source, width, height, prefix) {
 		var scale = Math.min(1, SHOT_MAX_SIDE / Math.max(width, height));
 		var canvas = document.createElement('canvas');
 		canvas.width = Math.max(1, Math.round(width * scale));
@@ -963,7 +967,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		return new Promise(function (resolve, reject) {
 			canvas.toBlob(function (blob) {
 				if (!blob) { reject(); return; }
-				resolve(new File([blob], 'photo-' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+				resolve(new File([blob], (prefix || 'photo') + '-' + Date.now() + '.jpg', { type: 'image/jpeg' }));
 			}, 'image/jpeg', 0.85);
 		});
 	}
@@ -1004,19 +1008,22 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		});
 	}
 
-	function sendShot(file) {
+	// Общая дорога для съёмки: подготовить файл в браузере, отправить, показать
+	// заметку, дать полоску возврата. Фото и видео расходятся только в том, что
+	// готовится, и в надписях.
+	function sendCapture(prepare, ui) {
 		setError('');
-		setShotStatus('Отправляю фото…', false);
-		setShotBusy(true);
+		setShotStatus(ui.working, false);
+		setBusy(ui.busy, true);
 
-		var prepared = needsShrink(file) ? shrinkShot(file) : Promise.resolve(file);
-
-		return prepared.catch(function () { return null; }).then(function (ready) {
+		return prepare.catch(function () { return null; }).then(function (ready) {
 			if (!ready) {
-				setShotBusy(false);
-				setShotStatus('Не удалось обработать снимок', true);
+				setBusy(ui.busy, false);
+				setShotStatus(ui.failed, true);
 				return;
 			}
+
+			setShotStatus(ui.sending || ui.working, false);
 
 			var body = new FormData();
 			body.append('action', 'add');
@@ -1024,7 +1031,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			body.append('media[]', ready);
 
 			return post(body, true).then(function (data) {
-				setShotBusy(false);
+				setBusy(ui.busy, false);
 				if (!data.ok) { setShotStatus(data.error || 'Ошибка', true); return; }
 				setShotStatus('', false);
 				if (!data.item) return;
@@ -1033,11 +1040,20 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 				// Подтверждения перед съёмкой нет намеренно, поэтому возврат даём
 				// после: случайный кадр убирается одним нажатием, не целясь в
 				// крестик. Сама заметка при этом уходит в корзину, как обычно.
-				showUndo('Фото сохранено', 0, function () { return undoShot(id); }, 'Отменить');
+				showUndo(ui.saved, 0, function () { return undoShot(id); }, 'Отменить');
 			}).catch(function () {
-				setShotBusy(false);
+				setBusy(ui.busy, false);
 				setShotStatus('Нет связи', true);
 			});
+		});
+	}
+
+	function sendShot(file) {
+		return sendCapture(needsShrink(file) ? shrinkShot(file) : Promise.resolve(file), {
+			busy: shotLabel,
+			working: 'Отправляю фото…',
+			saved: 'Фото сохранено',
+			failed: 'Не удалось обработать снимок'
 		});
 	}
 
@@ -1048,6 +1064,168 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			// вызовет change, и кнопка покажется сломанной.
 			shotInput.value = '';
 			if (file) sendShot(file);
+		});
+	}
+
+	// --- Видео -------------------------------------------------------------
+	//
+	// Ролик с телефона весит десятки мегабайт, а дневнику нужен след события, а
+	// не архив записей. Поэтому сам файл на сервер не уходит: в браузере из него
+	// делается короткое немое превью — трейлер, как в телеграме, — и сохраняется
+	// только оно. Оригинал нигде не остаётся, это решение осознанное.
+	//
+	// Трейлер — обычный webm или mp4, поэтому лента и просмотр показывают его
+	// теми же средствами, что и любое видео: миниатюра с треугольником, клик
+	// открывает во весь экран.
+
+	var CLIP_MAX_SIDE = 640;
+	var CLIP_SECONDS = 3;
+	var CLIP_FPS = 24;
+
+	var clipLabel = composer.querySelector('[data-clip]');
+	var clipInput = clipLabel ? clipLabel.querySelector('input[type=file]') : null;
+
+	function pickClipMime() {
+		if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+		// Порядок важен: mp4 первым ради Safari, где webm браузер не соберёт.
+		var types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+		for (var i = 0; i < types.length; i++) {
+			if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+		}
+		return '';
+	}
+
+	// Видео нужно живое: часть браузеров не декодирует элемент вне документа.
+	// Прячем его за краем экрана и убираем, как только кадры взяты.
+	function loadVideoFile(file) {
+		return new Promise(function (resolve, reject) {
+			var video = document.createElement('video');
+			video.muted = true;
+			video.defaultMuted = true;
+			video.playsInline = true;
+			video.setAttribute('playsinline', '');
+			video.preload = 'auto';
+			video.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;';
+			video.src = URL.createObjectURL(file);
+			video.onloadeddata = function () { resolve(video); };
+			video.onerror = function () { reject(); };
+			document.body.appendChild(video);
+		});
+	}
+
+	function dropVideo(video) {
+		try { video.pause(); } catch (e) {}
+		URL.revokeObjectURL(video.src);
+		if (video.parentNode) video.parentNode.removeChild(video);
+	}
+
+	// Запасной путь: если записать трейлер нечем, сохраняем один кадр.
+	function clipPoster(video) {
+		return new Promise(function (resolve, reject) {
+			function grab() {
+				video.onseeked = null;
+				drawToJpeg(video, video.videoWidth, video.videoHeight, 'clip').then(resolve, reject);
+			}
+			video.onseeked = grab;
+			try {
+				video.currentTime = Math.min(1, (video.duration || 2) / 2);
+			} catch (e) { grab(); }
+		});
+	}
+
+	function recordTrailer(video, mime) {
+		var canvas = document.createElement('canvas');
+		if (typeof canvas.captureStream !== 'function') return Promise.reject();
+
+		var scale = Math.min(1, CLIP_MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
+		canvas.width = Math.max(2, Math.round(video.videoWidth * scale));
+		canvas.height = Math.max(2, Math.round(video.videoHeight * scale));
+		var ctx = canvas.getContext('2d');
+
+		var recorder;
+		try {
+			recorder = new MediaRecorder(canvas.captureStream(CLIP_FPS), {
+				mimeType: mime,
+				videoBitsPerSecond: 1200000
+			});
+		} catch (e) {
+			return Promise.reject();
+		}
+
+		var chunks = [];
+		recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+
+		return new Promise(function (resolve, reject) {
+			var stopAt = Math.min(CLIP_SECONDS, video.duration || CLIP_SECONDS);
+			var frame = 0;
+			var done = false;
+
+			function finish() {
+				if (done) return;
+				done = true;
+				cancelAnimationFrame(frame);
+				try { video.pause(); } catch (e) {}
+				try { recorder.stop(); } catch (e) { reject(); }
+			}
+
+			function draw() {
+				ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+				if (video.currentTime >= stopAt || video.ended) { finish(); return; }
+				frame = requestAnimationFrame(draw);
+			}
+
+			recorder.onstop = function () {
+				var type = mime.split(';')[0];
+				var blob = new Blob(chunks, { type: type });
+				if (!blob.size) { reject(); return; }
+				var ext = type.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+				resolve(new File([blob], 'trailer-' + Date.now() + '.' + ext, { type: type }));
+			};
+			recorder.onerror = function () { reject(); };
+
+			// Страховка: если кадры не пошли, не висим бесконечно.
+			setTimeout(finish, (stopAt + 3) * 1000);
+
+			try { video.currentTime = 0; } catch (e) {}
+			try { recorder.start(); } catch (e) { reject(); return; }
+			frame = requestAnimationFrame(draw);
+			var started = video.play();
+			if (started && started.catch) started.catch(function () { finish(); });
+		});
+	}
+
+	function makeTrailer(file) {
+		return loadVideoFile(file).then(function (video) {
+			var mime = pickClipMime();
+			var work = mime
+				? recordTrailer(video, mime).catch(function () { return clipPoster(video); })
+				: clipPoster(video);
+
+			return work.then(function (out) {
+				dropVideo(video);
+				return out;
+			}, function (err) {
+				dropVideo(video);
+				throw err;
+			});
+		});
+	}
+
+	function sendClip(file) {
+		return sendCapture(makeTrailer(file), {
+			busy: clipLabel,
+			working: 'Готовлю превью…',
+			sending: 'Отправляю превью…',
+			saved: 'Превью видео сохранено',
+			failed: 'Не удалось обработать запись'
+		});
+	}
+
+	if (clipInput) {
+		clipInput.addEventListener('change', function () {
+			var file = clipInput.files && clipInput.files[0];
+			clipInput.value = '';
+			if (file) sendClip(file);
 		});
 	}
 

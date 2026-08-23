@@ -68,19 +68,22 @@
 	margin-left: auto;
 }
 
-/* Кнопка съёмки — только там, где есть камера. На десктопе браузер атрибут
-   capture игнорирует, и кнопка молча превращалась бы во второй «Файл». */
-[data-shot] {
+/* Кнопки съёмки — только там, где есть камера. На десктопе браузер атрибут
+   capture игнорирует, и они молча превратились бы во второй «Файл». */
+[data-shot],
+[data-clip] {
 	display: none;
 }
 
 @media (pointer: coarse) {
-	[data-shot] {
+	[data-shot],
+	[data-clip] {
 		display: inline-flex;
 	}
 }
 
-[data-shot].is-busy {
+[data-shot].is-busy,
+[data-clip].is-busy {
 	opacity: 0.55;
 	pointer-events: none;
 }
