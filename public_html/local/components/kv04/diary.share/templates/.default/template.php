@@ -31,6 +31,28 @@ $kv04Items = $arResult['ITEMS'] ?? [];
 	<div class="kv04-lightbox__stage" role="dialog" aria-modal="true" aria-label="Просмотр медиа"></div>
 </div>
 
+<?php
+/**
+ * Подсветка кода нужна и здесь. Стили темы страница подключает вместе со
+ * стилями ленты, но красит блоки сама библиотека, а она подключалась только
+ * в ленте владельца — по ссылке код оставался серым на тёмной подложке.
+ * Файл тот же, что и у ленты, метка mtime — тоже.
+ */
+$kv04HljsSrc = '/local/modules/kv04.diary/assets/highlight/highlight.min.js';
+$kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
+?>
+<script src="<?=htmlspecialcharsbx($kv04HljsSrc . ($kv04HljsVersion > 0 ? '?v=' . $kv04HljsVersion : ''))?>"></script>
+<script>
+(function () {
+	// Красим один раз при загрузке: заметки здесь не меняются, значит и
+	// перекрашивать нечего.
+	if (!window.hljs) return;
+	document.querySelectorAll('.kv04-note__body pre code').forEach(function (el) {
+		try { hljs.highlightElement(el); } catch (err) {}
+	});
+})();
+</script>
+
 <script>
 (function () {
 	// Просмотрщик для картинок и видео: на странице по ссылке он тоже нужен,
