@@ -194,9 +194,14 @@ foreach ($kv04Books as $kv04Book)
 				Файл
 				<input type="file" name="media[]" accept="image/*,video/mp4,video/webm" multiple hidden>
 			</label>
+			<label class="kv04-btn kv04-btn--muted kv04-btn--sm" data-shot title="Снять и сразу сохранить">
+				Фото
+				<input type="file" accept="image/*" capture="environment" hidden>
+			</label>
 			<button type="submit" class="kv04-btn kv04-btn--primary kv04-btn--sm" title="Готово (Ctrl+Enter)">Готово</button>
 		</div>
 		<div class="kv04-composer__preview" data-file-preview hidden></div>
+		<p class="kv04-composer__status" data-shot-status hidden></p>
 		<p class="kv04-feed__error" data-error hidden></p>
 	</form>
 
@@ -245,7 +250,9 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 	var list = root.querySelector('[data-list]');
 	var error = root.querySelector('[data-error]');
 	var filePreview = root.querySelector('[data-file-preview]');
-	var fileInput = composer.querySelector('input[type=file]');
+	// Именно поле «Файл»: в панели есть второй file input — у кнопки съёмки,
+	// и первый попавшийся селектор однажды подцепил бы не тот.
+	var fileInput = composer.querySelector('input[name="media[]"]');
 	var pendingFiles = new DataTransfer();
 	var previewUrls = [];
 
@@ -878,6 +885,16 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		return note;
 	}
 
+	// Новая заметка показывается одинаково, кто бы её ни завёл — отправка
+	// композером или съёмка. Сервер возвращает готовый элемент, поэтому
+	// ленту не перечитываем и страницу не перезагружаем.
+	function insertNewNote(item) {
+		var note = createNoteElement(item);
+		list.insertBefore(note, list.firstChild);
+		highlight(note);
+		return note;
+	}
+
 	function submitComposer() {
 		setError('');
 		if (composerSubmit) composerSubmit.disabled = true;
@@ -887,13 +904,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			input.innerHTML = '';
 			syncPlaceholder();
 			clearComposerFiles();
-			// Раньше здесь был location.reload(): полный проход по стеку
-			// ради одной новой заметки. Сервер уже вернул готовый элемент.
-			if (data.item) {
-				var note = createNoteElement(data.item);
-				list.insertBefore(note, list.firstChild);
-				highlight(note);
-			}
+			if (data.item) insertNewNote(data.item);
 		}).catch(function () {
 			if (composerSubmit) composerSubmit.disabled = false;
 			setError('Нет связи');
@@ -904,6 +915,141 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		e.preventDefault();
 		submitComposer();
 	});
+
+	// --- Съёмка ------------------------------------------------------------
+	//
+	// Кнопка «Фото» открывает камеру и отправляет снимок сразу, без превью и
+	// без подтверждения: момент, ради которого достали телефон, проходит
+	// быстрее, чем пять шагов через «Файл». Передумать можно после — полоской
+	// «Отменить», она же живёт у удаления.
+
+	// Столько же принимает сервер (NoteService::MAX_IMAGE) и такие расширения
+	// он пропускает (IMAGE_EXT). Клиент обязан уложиться в оба ограничения:
+	// иначе файл молча отбросится и в ответ придёт «Пустая заметка».
+	var SHOT_MAX_BYTES = 8388608;
+	var SHOT_MAX_SIDE = 2560;
+	var SHOT_SAFE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+
+	var shotLabel = composer.querySelector('[data-shot]');
+	var shotInput = shotLabel ? shotLabel.querySelector('input[type=file]') : null;
+	var shotStatus = composer.querySelector('[data-shot-status]');
+
+	function setShotStatus(text, isError) {
+		if (!shotStatus) return;
+		shotStatus.textContent = text || '';
+		shotStatus.classList.toggle('is-error', !!isError);
+		shotStatus.hidden = !text;
+	}
+
+	function setShotBusy(busy) {
+		if (shotLabel) shotLabel.classList.toggle('is-busy', !!busy);
+	}
+
+	// Снимок с телефона бывает тяжелее серверного потолка, а iPhone изредка
+	// отдаёт heic, которого сервер не принимает. И то и другое лечится одним
+	// приёмом — перерисовать в canvas и отдать jpeg. Снимок полегче и в
+	// понятном формате не трогаем: пусть лежит как снят.
+	function needsShrink(file) {
+		return file.size > SHOT_MAX_BYTES || !SHOT_SAFE_EXT.test(file.name || '');
+	}
+
+	function drawToJpeg(source, width, height) {
+		var scale = Math.min(1, SHOT_MAX_SIDE / Math.max(width, height));
+		var canvas = document.createElement('canvas');
+		canvas.width = Math.max(1, Math.round(width * scale));
+		canvas.height = Math.max(1, Math.round(height * scale));
+		canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+
+		return new Promise(function (resolve, reject) {
+			canvas.toBlob(function (blob) {
+				if (!blob) { reject(); return; }
+				resolve(new File([blob], 'photo-' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+			}, 'image/jpeg', 0.85);
+		});
+	}
+
+	function shrinkViaImage(file) {
+		return new Promise(function (resolve, reject) {
+			var url = URL.createObjectURL(file);
+			var img = new Image();
+			img.onload = function () {
+				drawToJpeg(img, img.naturalWidth, img.naturalHeight).then(function (out) {
+					URL.revokeObjectURL(url);
+					resolve(out);
+				}, function () { URL.revokeObjectURL(url); reject(); });
+			};
+			img.onerror = function () { URL.revokeObjectURL(url); reject(); };
+			img.src = url;
+		});
+	}
+
+	function shrinkShot(file) {
+		if (!window.createImageBitmap) return shrinkViaImage(file);
+
+		// Ориентацию из EXIF применяет сам декодер — иначе снятое боком легло бы
+		// боком и в дневник. Старые браузеры такой параметр не знают, поэтому
+		// второй заход без него, а третий — вовсе через <img>.
+		return Promise.resolve()
+			.then(function () { return createImageBitmap(file, { imageOrientation: 'from-image' }); })
+			.catch(function () { return createImageBitmap(file); })
+			.then(function (bitmap) { return drawToJpeg(bitmap, bitmap.width, bitmap.height); })
+			.catch(function () { return shrinkViaImage(file); });
+	}
+
+	function undoShot(id) {
+		return post({ action: 'delete', id: id }).then(function (data) {
+			if (!data.ok) return;
+			var node = list.querySelector('.kv04-note[data-id="' + id + '"]');
+			if (node) node.remove();
+		});
+	}
+
+	function sendShot(file) {
+		setError('');
+		setShotStatus('Отправляю фото…', false);
+		setShotBusy(true);
+
+		var prepared = needsShrink(file) ? shrinkShot(file) : Promise.resolve(file);
+
+		return prepared.catch(function () { return null; }).then(function (ready) {
+			if (!ready) {
+				setShotBusy(false);
+				setShotStatus('Не удалось обработать снимок', true);
+				return;
+			}
+
+			var body = new FormData();
+			body.append('action', 'add');
+			body.append('text', '');
+			body.append('media[]', ready);
+
+			return post(body, true).then(function (data) {
+				setShotBusy(false);
+				if (!data.ok) { setShotStatus(data.error || 'Ошибка', true); return; }
+				setShotStatus('', false);
+				if (!data.item) return;
+				insertNewNote(data.item);
+				var id = data.item.id;
+				// Подтверждения перед съёмкой нет намеренно, поэтому возврат даём
+				// после: случайный кадр убирается одним нажатием, не целясь в
+				// крестик. Сама заметка при этом уходит в корзину, как обычно.
+				showUndo('Фото сохранено', 0, function () { return undoShot(id); }, 'Отменить');
+			}).catch(function () {
+				setShotBusy(false);
+				setShotStatus('Нет связи', true);
+			});
+		});
+	}
+
+	if (shotInput) {
+		shotInput.addEventListener('change', function () {
+			var file = shotInput.files && shotInput.files[0];
+			// Значение сбрасываем сразу: иначе второй кадр с тем же именем не
+			// вызовет change, и кнопка покажется сломанной.
+			shotInput.value = '';
+			if (file) sendShot(file);
+		});
+	}
 
 	bindEditor(input, {
 		onSave: submitComposer,
@@ -1579,7 +1725,9 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		bar.className = 'kv04-undo';
 
 		var text = document.createElement('span');
-		text.textContent = message + ', хранится ' + days + ' дней';
+		// Срок хранения дописываем только там, где он есть: у съёмки полоска
+		// говорит «Фото сохранено», и хвост про корзину был бы не про то.
+		text.textContent = days ? message + ', хранится ' + days + ' дней' : message;
 		bar.appendChild(text);
 
 		var back = document.createElement('button');

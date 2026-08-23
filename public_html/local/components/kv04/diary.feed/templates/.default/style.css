@@ -68,6 +68,35 @@
 	margin-left: auto;
 }
 
+/* Кнопка съёмки — только там, где есть камера. На десктопе браузер атрибут
+   capture игнорирует, и кнопка молча превращалась бы во второй «Файл». */
+[data-shot] {
+	display: none;
+}
+
+@media (pointer: coarse) {
+	[data-shot] {
+		display: inline-flex;
+	}
+}
+
+[data-shot].is-busy {
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+/* Снимок уходит без подтверждения, поэтому о ходе дела говорит строка —
+   неяркая, как статус в панели правки: это не ошибка, а сообщение. */
+.kv04-composer__status {
+	margin: 0.5rem 0 0;
+	font-size: 0.82rem;
+	color: var(--kv04-text-muted);
+}
+
+.kv04-composer__status.is-error {
+	color: var(--kv04-danger);
+}
+
 .kv04-composer__preview {
 	margin-top: 0.5rem;
 }
