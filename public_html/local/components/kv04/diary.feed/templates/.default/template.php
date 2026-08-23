@@ -85,7 +85,11 @@ if (!function_exists('kv04DiaryRenderItems'))
 										data-src="<?=htmlspecialcharsbx($file['src'])?>"
 										data-file-id="<?=(int)$file['id']?>"
 										aria-label="Открыть видео">
-										<video src="<?=htmlspecialcharsbx($file['src'])?>" muted playsinline preload="metadata"></video>
+										<?php /* #t=0.1 — не украшение: без метки времени Safari на iPhone
+										   рисует вместо миниатюры чёрный прямоугольник, потому что кадр
+										   декодируется только при воспроизведении. Просмотрщик берёт
+										   адрес из data-src, там метки нет. */ ?>
+										<video src="<?=htmlspecialcharsbx($file['src'])?>#t=0.1" muted playsinline preload="metadata"></video>
 										<span class="kv04-media-thumb__play" aria-hidden="true"></span>
 										<?php if ($isOverflow): ?>
 											<span class="kv04-media-thumb__count">+<?=$extraCount?></span>
@@ -1362,7 +1366,9 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 				thumb.appendChild(img);
 			} else if (file.is_video) {
 				var video = document.createElement('video');
-				video.src = file.src;
+				// #t=0.1 — чтобы Safari показал кадр, а не чёрный прямоугольник:
+				// без метки времени он не декодирует первый кадр до воспроизведения.
+				video.src = file.src + '#t=0.1';
 				video.muted = true;
 				video.playsInline = true;
 				video.preload = 'metadata';
@@ -2118,8 +2124,30 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			video.src = src;
 			video.controls = true;
 			video.playsInline = true;
+			video.setAttribute('playsinline', '');
 			video.autoplay = true;
+			video.preload = 'auto';
+
+			// Короткое зациклим: трейлер на три секунды иначе успевает мигнуть и
+			// кончиться раньше, чем на него посмотрели. Длинное видео крутить по
+			// кругу незачем.
+			video.addEventListener('loadedmetadata', function () {
+				if (video.duration && video.duration <= 6) video.loop = true;
+			});
+
 			lightboxStage.appendChild(video);
+
+			// Браузер отказывается запускать со звуком без прямого нажатия. У
+			// трейлера звука нет вовсе, поэтому второй заход без него: лучше
+			// показать видео молча, чем чёрный кадр с кнопкой.
+			var started = video.play();
+			if (started && started.catch) {
+				started.catch(function () {
+					video.muted = true;
+					var again = video.play();
+					if (again && again.catch) again.catch(function () {});
+				});
+			}
 		} else {
 			var img = document.createElement('img');
 			img.src = src;
