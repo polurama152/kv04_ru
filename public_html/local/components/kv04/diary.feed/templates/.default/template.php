@@ -408,6 +408,9 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		root.addEventListener('keydown', function (e) {
 			if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
 				e.preventDefault();
+				// Тот же хоткей ловит и вся заметка целиком — сообщаем ей, что
+				// здесь уже сохранили, иначе правка уедет на сервер дважды.
+				e.stopPropagation();
 				if (opts.onSave) opts.onSave();
 				return;
 			}
@@ -963,6 +966,9 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 	}
 
 	function closeEdit(note, html, hasBody) {
+		if (note._editCtx && note._editCtx.onKeydown) {
+			note.removeEventListener('keydown', note._editCtx.onKeydown);
+		}
 		var body = note.querySelector('.kv04-note__body');
 		if (!body) return;
 		var bar = note.querySelector('.kv04-edit-bar');
@@ -1094,6 +1100,10 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			}
 			renderNoteMedia(note, data.media || []);
 			setEditAttachStatus(bar, '', false);
+			// Файл прикреплён — курсор возвращается в текст, чтобы можно было
+			// дописывать и сохранять с клавиатуры, не целясь мышью в «Готово».
+			var editable = note.querySelector('.kv04-note__body[contenteditable="true"]');
+			if (editable) editable.focus();
 		}).catch(function () {
 			bar.classList.remove('is-uploading');
 			setEditAttachStatus(bar, 'Нет связи', true);
@@ -1139,6 +1149,9 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		save.title = 'Готово (' + saveShortcutLabel + ')';
 
 		function doSave() {
+			// Сохранение уже идёт: хоткей и клик по «Готово» не должны отправить
+			// правку дважды.
+			if (save.disabled) return;
 			save.disabled = true;
 			var html = serializeForSave(body);
 			post({ action: 'edit', id: id, text: html }).then(function (data) {
@@ -1154,7 +1167,18 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			});
 		}
 
-		note._editCtx = { originalHtml: current, hadBody: hadBody, doSave: doSave };
+		// Хоткей «Готово» слушает всю заметку, а не только её текст. Раньше он
+		// висел на редактируемом теле, и стоило фокусу уйти на «Файл» или «Код»,
+		// как Ctrl+Enter ловить становилось некому. Заметнее всего это было там,
+		// куда только что прикрепили картинку: фокус оставался на кнопке файла.
+		function onNoteKeydown(e) {
+			if (!(e.ctrlKey || e.metaKey) || e.key !== 'Enter') return;
+			e.preventDefault();
+			doSave();
+		}
+		note.addEventListener('keydown', onNoteKeydown);
+
+		note._editCtx = { originalHtml: current, hadBody: hadBody, doSave: doSave, onKeydown: onNoteKeydown };
 		save.addEventListener('click', doSave);
 
 		editCode.addEventListener('click', function () {
