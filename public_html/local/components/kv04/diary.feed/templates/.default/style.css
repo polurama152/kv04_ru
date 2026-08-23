@@ -433,7 +433,11 @@
 	pointer-events: none;
 }
 
-.kv04-media-thumb--video .kv04-media-thumb__play {
+/* Треугольник поверх кадра. Кроме собственно видео его показывает заметка,
+   чей ролик лежит в памяти этого телефона: миниатюра там — картинка, но клик
+   по ней проигрывает запись, и об этом надо сказать заранее. */
+.kv04-media-thumb--video .kv04-media-thumb__play,
+.kv04-note[data-clip-id] .kv04-media-thumb__play {
 	position: absolute;
 	inset: 0;
 	display: flex;
@@ -443,7 +447,8 @@
 	pointer-events: none;
 }
 
-.kv04-media-thumb--video .kv04-media-thumb__play::after {
+.kv04-media-thumb--video .kv04-media-thumb__play::after,
+.kv04-note[data-clip-id] .kv04-media-thumb__play::after {
 	content: "";
 	width: 0;
 	height: 0;
