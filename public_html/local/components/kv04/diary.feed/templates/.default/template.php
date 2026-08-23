@@ -1005,6 +1005,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 	}
 
 	function undoShot(id) {
+		clipDrop(id).catch(function () {});
 		return post({ action: 'delete', id: id }).then(function (data) {
 			if (!data.ok) return;
 			var node = list.querySelector('.kv04-note[data-id="' + id + '"]');
@@ -1031,7 +1032,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 			var body = new FormData();
 			body.append('action', 'add');
-			body.append('text', '');
+			body.append('text', typeof ui.text === 'function' ? ui.text() : (ui.text || ''));
 			body.append('media[]', ready);
 
 			return post(body, true).then(function (data) {
@@ -1040,6 +1041,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 				setShotStatus('', false);
 				if (!data.item) return;
 				insertNewNote(data.item);
+				if (ui.after) ui.after(data.item);
 				var id = data.item.id;
 				// Подтверждения перед съёмкой нет намеренно, поэтому возврат даём
 				// после: случайный кадр убирается одним нажатием, не целясь в
@@ -1073,39 +1075,88 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 	// --- Видео -------------------------------------------------------------
 	//
-	// Ролик с телефона весит десятки мегабайт, а дневнику нужен след события, а
-	// не архив записей. Поэтому сам файл на сервер не уходит: в браузере из него
-	// делается короткое немое превью — трейлер, как в телеграме, — и сохраняется
-	// только оно. Оригинал нигде не остаётся, это решение осознанное.
+	// Ролик с телефона весит десятки мегабайт, и на сервер он не уезжает. В
+	// дневник ложится кадр и приметы записи — имя файла, длина, вес, дата, —
+	// чтобы её было по чему узнать. Сам ролик остаётся на телефоне, в памяти
+	// браузера: по клику играет, кнопкой сохраняется в «Загрузки», откуда его
+	// видно в галерее и файловом менеджере.
 	//
-	// Трейлер — обычный webm или mp4, поэтому лента и просмотр показывают его
-	// теми же средствами, что и любое видео: миниатюра с треугольником, клик
-	// открывает во весь экран.
+	// Ссылку прямо на файл в галерее дать нельзя, и это не недоделка: браузер
+	// получает от камеры файл без пути, ссылки file:// со страницы по https
+	// заблокированы, доступа к галерее у страницы нет вовсе. Поэтому «в
+	// галерею» здесь — это скачивание из памяти браузера, а не ссылка на файл.
 
-	var CLIP_MAX_SIDE = 640;
-	var CLIP_SECONDS = 3;
-	var CLIP_FPS = 24;
+	var CLIP_DB = 'kv04-diary-clips';
+	var CLIP_STORE = 'clips';
+	var clipDbPromise = null;
+	var clipObjectUrl = null;
 
 	var clipLabel = composer.querySelector('[data-clip]');
 	var clipInput = clipLabel ? clipLabel.querySelector('input[type=file]') : null;
 
-	function pickClipMime() {
-		if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
-		// Порядок важен: mp4 первым ради Safari, где webm браузер не соберёт.
-		var types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
-		for (var i = 0; i < types.length; i++) {
-			if (MediaRecorder.isTypeSupported(types[i])) return types[i];
-		}
-		return '';
+	function clipDb() {
+		if (clipDbPromise) return clipDbPromise;
+		clipDbPromise = new Promise(function (resolve, reject) {
+			if (!window.indexedDB) { reject(); return; }
+			var req = indexedDB.open(CLIP_DB, 1);
+			req.onupgradeneeded = function () {
+				var db = req.result;
+				if (!db.objectStoreNames.contains(CLIP_STORE)) {
+					db.createObjectStore(CLIP_STORE, { keyPath: 'id' });
+				}
+			};
+			req.onsuccess = function () { resolve(req.result); };
+			req.onerror = function () { reject(); };
+		});
+		return clipDbPromise;
+	}
+
+	function clipTx(mode, run) {
+		return clipDb().then(function (db) {
+			return new Promise(function (resolve, reject) {
+				var req = run(db.transaction(CLIP_STORE, mode).objectStore(CLIP_STORE));
+				req.onsuccess = function () { resolve(req.result); };
+				req.onerror = function () { reject(); };
+			});
+		});
+	}
+
+	function clipPut(record) { return clipTx('readwrite', function (store) { return store.put(record); }); }
+	function clipGet(id) { return clipTx('readonly', function (store) { return store.get(Number(id)); }); }
+	function clipDrop(id) { return clipTx('readwrite', function (store) { return store['delete'](Number(id)); }); }
+	function clipKeys() { return clipTx('readonly', function (store) { return store.getAllKeys(); }); }
+
+	function clipDuration(seconds) {
+		var total = Math.max(1, Math.round(seconds || 0));
+		var ss = total % 60;
+		return Math.floor(total / 60) + ':' + (ss < 10 ? '0' : '') + ss;
+	}
+
+	function clipSize(bytes) {
+		var mb = (bytes || 0) / 1048576;
+		return (mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10) + ' МБ';
+	}
+
+	// Приметы ложатся текстом заметки, а не рядом с ней: текст виден на любом
+	// устройстве и переживает любую чистку памяти браузера. По имени файла
+	// ролик находится в галерее телефона руками.
+	function clipCaption(file, duration) {
+		var at = new Date(file.lastModified || Date.now());
+		var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+		return [
+			file.name || 'видео',
+			clipDuration(duration),
+			clipSize(file.size),
+			pad(at.getDate()) + '.' + pad(at.getMonth() + 1) + '.' + at.getFullYear() + ' ' + pad(at.getHours()) + ':' + pad(at.getMinutes())
+		].join(' · ');
 	}
 
 	// Видео нужно живое: часть браузеров не декодирует элемент вне документа.
-	// Прячем его за краем экрана и убираем, как только кадры взяты.
+	// Прячем за краем экрана и убираем, как только кадр взят.
 	function loadVideoFile(file) {
 		return new Promise(function (resolve, reject) {
 			var video = document.createElement('video');
 			video.muted = true;
-			video.defaultMuted = true;
 			video.playsInline = true;
 			video.setAttribute('playsinline', '');
 			video.preload = 'auto';
@@ -1123,8 +1174,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		if (video.parentNode) video.parentNode.removeChild(video);
 	}
 
-	// Запасной путь: если записать трейлер нечем, сохраняем один кадр.
-	function clipPoster(video) {
+	function clipFrame(video) {
 		return new Promise(function (resolve, reject) {
 			function grab() {
 				video.onseeked = null;
@@ -1137,77 +1187,12 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		});
 	}
 
-	function recordTrailer(video, mime) {
-		var canvas = document.createElement('canvas');
-		if (typeof canvas.captureStream !== 'function') return Promise.reject();
-
-		var scale = Math.min(1, CLIP_MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
-		canvas.width = Math.max(2, Math.round(video.videoWidth * scale));
-		canvas.height = Math.max(2, Math.round(video.videoHeight * scale));
-		var ctx = canvas.getContext('2d');
-
-		var recorder;
-		try {
-			recorder = new MediaRecorder(canvas.captureStream(CLIP_FPS), {
-				mimeType: mime,
-				videoBitsPerSecond: 1200000
-			});
-		} catch (e) {
-			return Promise.reject();
-		}
-
-		var chunks = [];
-		recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
-
-		return new Promise(function (resolve, reject) {
-			var stopAt = Math.min(CLIP_SECONDS, video.duration || CLIP_SECONDS);
-			var frame = 0;
-			var done = false;
-
-			function finish() {
-				if (done) return;
-				done = true;
-				cancelAnimationFrame(frame);
-				try { video.pause(); } catch (e) {}
-				try { recorder.stop(); } catch (e) { reject(); }
-			}
-
-			function draw() {
-				ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-				if (video.currentTime >= stopAt || video.ended) { finish(); return; }
-				frame = requestAnimationFrame(draw);
-			}
-
-			recorder.onstop = function () {
-				var type = mime.split(';')[0];
-				var blob = new Blob(chunks, { type: type });
-				if (!blob.size) { reject(); return; }
-				var ext = type.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
-				resolve(new File([blob], 'trailer-' + Date.now() + '.' + ext, { type: type }));
-			};
-			recorder.onerror = function () { reject(); };
-
-			// Страховка: если кадры не пошли, не висим бесконечно.
-			setTimeout(finish, (stopAt + 3) * 1000);
-
-			try { video.currentTime = 0; } catch (e) {}
-			try { recorder.start(); } catch (e) { reject(); return; }
-			frame = requestAnimationFrame(draw);
-			var started = video.play();
-			if (started && started.catch) started.catch(function () { finish(); });
-		});
-	}
-
-	function makeTrailer(file) {
+	function prepareClip(file) {
 		return loadVideoFile(file).then(function (video) {
-			var mime = pickClipMime();
-			var work = mime
-				? recordTrailer(video, mime).catch(function () { return clipPoster(video); })
-				: clipPoster(video);
-
-			return work.then(function (out) {
+			var duration = video.duration || 0;
+			return clipFrame(video).then(function (frame) {
 				dropVideo(video);
-				return out;
+				return { frame: frame, duration: duration };
 			}, function (err) {
 				dropVideo(video);
 				throw err;
@@ -1215,13 +1200,99 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		});
 	}
 
+	function storeClip(item, file, info) {
+		// Просим систему беречь хранилище: кроме галереи телефона другой копии
+		// ролика нет, и тихая чистка была бы потерей.
+		if (navigator.storage && navigator.storage.persist) {
+			try { navigator.storage.persist(); } catch (e) {}
+		}
+
+		return clipPut({
+			id: Number(item.id),
+			blob: file,
+			name: file.name || 'video.mp4',
+			size: file.size,
+			duration: info ? info.duration : 0,
+			at: file.lastModified || Date.now()
+		}).then(function () {
+			markClipNote(item.id);
+		}, function () {
+			setShotStatus('Видео не поместилось в память браузера — в дневнике остался кадр', true);
+		});
+	}
+
+	// Заметка, чей ролик лежит на этом телефоне, показывает поверх кадра
+	// треугольник: клик по ней играет видео, а не открывает картинку.
+	function markClipNote(id) {
+		var note = list.querySelector('.kv04-note[data-id="' + id + '"]');
+		if (!note) return;
+		note.setAttribute('data-clip-id', String(id));
+		var thumb = note.querySelector('.kv04-media-thumb');
+		if (thumb && !thumb.querySelector('.kv04-media-thumb__play')) {
+			var play = document.createElement('span');
+			play.className = 'kv04-media-thumb__play';
+			play.setAttribute('aria-hidden', 'true');
+			thumb.appendChild(play);
+		}
+	}
+
+	function markStoredClips() {
+		clipKeys().then(function (keys) {
+			(keys || []).forEach(markClipNote);
+		}).catch(function () {});
+	}
+
+	function openStoredClip(id, trigger) {
+		clipGet(id).then(function (record) {
+			if (!record || !record.blob) {
+				setShotStatus('Ролика нет в памяти этого браузера — остались кадр и приметы', true);
+				return;
+			}
+
+			clipObjectUrl = URL.createObjectURL(record.blob);
+			openLightbox('video', clipObjectUrl, trigger);
+			if (!lightboxStage) return;
+
+			// Скачивание кладёт файл в «Загрузки» — оттуда его видно галерее и
+			// файловому менеджеру. Прямее в галерею со страницы не попасть.
+			var save = document.createElement('a');
+			save.className = 'kv04-btn kv04-btn--muted kv04-btn--sm kv04-lightbox__save';
+			save.textContent = 'Сохранить в телефон';
+			save.href = clipObjectUrl;
+			save.download = record.name || 'video.mp4';
+			lightboxStage.appendChild(save);
+		}).catch(function () {
+			setShotStatus('Не добраться до памяти браузера', true);
+		});
+	}
+
+	// Слушатель стоит раньше просмотрщика и, когда ролик есть, обрывает
+	// дальнейшую обработку: иначе следом открылась бы картинка-кадр.
+	root.addEventListener('click', function (e) {
+		var thumb = e.target.closest('.kv04-media-thumb');
+		if (!thumb || !root.contains(thumb)) return;
+		var note = thumb.closest('.kv04-note[data-clip-id]');
+		if (!note) return;
+		e.preventDefault();
+		e.stopImmediatePropagation();
+		openStoredClip(note.getAttribute('data-clip-id'), thumb);
+	});
+
 	function sendClip(file) {
-		return sendCapture(makeTrailer(file), {
+		var prepared = null;
+		var prepare = prepareClip(file).then(function (info) {
+			prepared = info;
+			return info.frame;
+		});
+
+		return sendCapture(prepare, {
 			busy: clipLabel,
-			working: 'Готовлю превью…',
-			sending: 'Отправляю превью…',
-			saved: 'Превью видео сохранено',
-			failed: 'Не удалось обработать запись'
+			working: 'Готовлю кадр…',
+			sending: 'Отправляю кадр…',
+			saved: 'Кадр в дневнике, видео на телефоне',
+			failed: 'Не удалось обработать запись',
+			text: function () { return prepared ? clipCaption(file, prepared.duration) : ''; },
+			after: function (item) { return storeClip(item, file, prepared); }
 		});
 	}
 
@@ -1232,6 +1303,8 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			if (file) sendClip(file);
 		});
 	}
+
+	markStoredClips();
 
 	bindEditor(input, {
 		onSave: submitComposer,
@@ -2102,6 +2175,10 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			video.load();
 		}
 		lightboxStage.innerHTML = '';
+		if (clipObjectUrl) {
+			URL.revokeObjectURL(clipObjectUrl);
+			clipObjectUrl = null;
+		}
 		lightbox.classList.remove('is-open');
 		lightbox.setAttribute('aria-hidden', 'true');
 		document.body.classList.remove('kv04-lightbox-open');

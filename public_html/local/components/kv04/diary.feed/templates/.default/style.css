@@ -596,6 +596,24 @@
 	animation: kv04-lightbox-in 0.22s ease;
 }
 
+/* Кнопка сохранения поверх видео. Сцена просмотрщика указатель не ловит
+   (pointer-events: none), поэтому кнопке его возвращаем явно, как картинке и
+   видео выше. Тёмный кружок — чтобы читалась на любом кадре. */
+.kv04-lightbox__save {
+	position: absolute;
+	left: 50%;
+	bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+	transform: translateX(-50%);
+	pointer-events: auto;
+	text-decoration: none;
+	background: rgba(0, 0, 0, 0.62);
+	color: #fff;
+}
+
+.kv04-lightbox__save:hover {
+	background: rgba(0, 0, 0, 0.8);
+}
+
 @keyframes kv04-lightbox-in {
 	from {
 		opacity: 0;
