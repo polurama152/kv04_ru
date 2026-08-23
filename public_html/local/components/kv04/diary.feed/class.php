@@ -9,6 +9,7 @@ use Kv04\Diary\Installer;
 use Kv04\Diary\BookService;
 use Kv04\Diary\NoteService;
 use Kv04\Diary\PinService;
+use Kv04\Diary\ShareService;
 
 class Kv04DiaryFeedComponent extends CBitrixComponent
 {
@@ -56,6 +57,9 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		$this->arResult['CURRENT_BOOK'] = $currentBook;
 		$this->arResult['MAX_BOOKS'] = BookService::MAX_BOOKS;
 		$this->arResult['ITEMS'] = NoteService::list($ownerId, $currentBook);
+		// Чтобы кнопка «Поделиться» сразу знала, есть ли живая ссылка, и не
+		// заводила вторую там, где уже есть первая.
+		$this->arResult['SHARE_URL'] = ShareService::liveUrl($ownerId, $currentBook);
 		$this->includeComponentTemplate();
 	}
 
@@ -83,6 +87,7 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 				'ok' => true,
 				'book' => $bookId,
 				'items' => NoteService::list($ownerId, $bookId),
+				'share_url' => ShareService::liveUrl($ownerId, $bookId),
 			]);
 			return;
 		}
@@ -99,6 +104,23 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		if ($action === 'book_delete')
 		{
 			$this->json(BookService::delete($ownerId, (int)$this->request->getPost('book')));
+			return;
+		}
+
+		// Делимся всегда открытым дневником, а не тем, что назвал клиент:
+		// так не нужно проверять, его ли это дневник, — вопрос не возникает.
+		if ($action === 'share_book')
+		{
+			$token = ShareService::linkFor($ownerId, BookService::currentId($ownerId));
+			$this->json($token === ''
+				? ['ok' => false, 'error' => 'Не удалось создать ссылку']
+				: ['ok' => true, 'url' => ShareService::url($token)]);
+			return;
+		}
+		if ($action === 'share_revoke')
+		{
+			ShareService::revoke($ownerId, BookService::currentId($ownerId));
+			$this->json(['ok' => true]);
 			return;
 		}
 

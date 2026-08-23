@@ -2,6 +2,7 @@
 
 use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
+use Kv04\Diary\ShareService;
 
 require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php';
 
@@ -13,7 +14,25 @@ if (is_file($kv04DiaryLoad))
 	$kv04DiaryLoaded = kv04DiaryLoadModule();
 }
 
-$APPLICATION->SetTitle('Мой дневник');
+/**
+ * Дневник, открытый по ссылке. Разбираем до первой строчки разметки: от
+ * ответа зависит и заголовок страницы, и код ответа. Несуществующая и
+ * отозванная ссылка отвечают одинаково — 404 и короткая страница, чтобы по
+ * ответу нельзя было понять, была ли когда-нибудь такая ссылка.
+ */
+$kv04DiaryToken = (string)($_GET['d'] ?? '');
+$kv04DiaryShare = null;
+if ($kv04DiaryToken !== '' && $kv04DiaryLoaded)
+{
+	Installer::ensure();
+	$kv04DiaryShare = ShareService::resolve($kv04DiaryToken);
+	if (!$kv04DiaryShare)
+	{
+		CHTTP::SetStatus('404 Not Found');
+	}
+}
+
+$APPLICATION->SetTitle($kv04DiaryShare ? $kv04DiaryShare['title'] : 'Мой дневник');
 
 /**
  * Статика отдаётся с Cache-Control на трое суток (mod_expires в .htaccess),
@@ -31,8 +50,9 @@ $kv04DiaryAsset = static function (string $path): string {
 $kv04DiaryThemeCss = '/local/modules/kv04.diary/assets/diary-theme.css';
 $kv04DiaryHljsCss = '/local/modules/kv04.diary/assets/highlight/atom-one-dark.min.css';
 $kv04DiaryComponentCss = '/local/components/kv04/diary.pin/templates/.default/style.css';
-$kv04DiaryFeed = $kv04DiaryLoaded && Auth::isLoggedIn();
-if ($kv04DiaryFeed)
+$kv04DiaryFeed = $kv04DiaryLoaded && $kv04DiaryToken === '' && Auth::isLoggedIn();
+// Заметки на странице по ссылке — те же, значит и стили ленты те же.
+if ($kv04DiaryFeed || $kv04DiaryShare)
 {
 	$kv04DiaryComponentCss = '/local/components/kv04/diary.feed/templates/.default/style.css';
 }
@@ -49,8 +69,13 @@ if ($kv04DiaryFeed)
 	<?php if ($kv04DiaryLoaded): ?>
 	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryComponentCss)) ?>">
 	<?php endif; ?>
-	<?php if ($kv04DiaryFeed): ?>
+	<?php if ($kv04DiaryFeed || $kv04DiaryShare): ?>
 	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryHljsCss)) ?>">
+	<?php endif; ?>
+	<?php if ($kv04DiaryToken !== ''): ?>
+	<?php /* Личный дневник не должен попасть в поиск, даже если ссылкой
+	   поделились в открытом чате и её подобрал робот. */ ?>
+	<meta name="robots" content="noindex, nofollow">
 	<?php endif; ?>
 </head>
 <body class="kv04-diary-body">
@@ -67,7 +92,25 @@ else
 {
 	Installer::ensure();
 
-	if (!Auth::isLoggedIn())
+	if ($kv04DiaryToken !== '')
+	{
+		if ($kv04DiaryShare)
+		{
+			$APPLICATION->IncludeComponent('kv04:diary.share', '.default', [
+				'OWNER' => $kv04DiaryShare['owner'],
+				'BOOK' => $kv04DiaryShare['book'],
+				'TITLE' => $kv04DiaryShare['title'],
+				'CACHE_TYPE' => 'N',
+			], false);
+		}
+		else
+		{
+			?>
+			<div class="kv04-diary__error">Такой ссылки нет. Возможно, доступ закрыли.</div>
+			<?php
+		}
+	}
+	elseif (!Auth::isLoggedIn())
 	{
 		$APPLICATION->IncludeComponent('kv04:diary.pin', '.default', [], false);
 	}

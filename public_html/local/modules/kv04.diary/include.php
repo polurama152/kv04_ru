@@ -34,6 +34,7 @@ if (class_exists(Loader::class))
 		'Kv04\\Diary\\Installer' => '/local/modules/kv04.diary/lib/installer.php',
 		'Kv04\\Diary\\AttemptLimiter' => '/local/modules/kv04.diary/lib/attemptlimiter.php',
 		'Kv04\\Diary\\BookService' => '/local/modules/kv04.diary/lib/bookservice.php',
+		'Kv04\\Diary\\ShareService' => '/local/modules/kv04.diary/lib/shareservice.php',
 		'Kv04\\Diary\\Auth' => '/local/modules/kv04.diary/lib/auth.php',
 		'Kv04\\Diary\\PinService' => '/local/modules/kv04.diary/lib/pinservice.php',
 		'Kv04\\Diary\\NoteService' => '/local/modules/kv04.diary/lib/noteservice.php',

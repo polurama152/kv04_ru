@@ -355,6 +355,94 @@
 	display: none;
 }
 
+/* Кнопки «Поделиться» — соседи крестиков и той же семьи: круглые, всплывают
+   по наведению. Каждая ростом со своего соседа, чтобы пара читалась парой:
+   блок 20, файл 24, заметка 28. Под курсором синеют, а не краснеют: это
+   действие ничего не убирает. */
+.kv04-note__share,
+.kv04-media-item__share,
+.kv04-block-share {
+	position: absolute;
+	z-index: 3;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.62);
+	color: #fff;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s ease, background 0.15s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.kv04-note__share:hover,
+.kv04-media-item__share:hover,
+.kv04-block-share:hover {
+	background: rgba(42, 171, 238, 0.92);
+}
+
+.kv04-note__share:focus-visible,
+.kv04-media-item__share:focus-visible,
+.kv04-block-share:focus-visible {
+	outline: 2px solid var(--kv04-accent);
+	outline-offset: 1px;
+	opacity: 1;
+}
+
+/* Заметка: слева от своего крестика — 4 отступа, 28 крестика, 4 зазора. */
+.kv04-note__share {
+	top: 4px;
+	right: 36px;
+	width: 28px;
+	height: 28px;
+	font-size: 1.05rem;
+}
+
+.kv04-note:hover .kv04-note__share,
+.kv04-note:focus-within .kv04-note__share {
+	opacity: 1;
+}
+
+.kv04-note.is-editing .kv04-note__share {
+	display: none;
+}
+
+/* Файл: справа от своего крестика, оба в левом верхнем углу картинки. */
+.kv04-media-item__share {
+	top: 4px;
+	left: 32px;
+	width: 24px;
+	height: 24px;
+	font-size: 0.95rem;
+}
+
+.kv04-note:hover .kv04-media-item__share,
+.kv04-note:focus-within .kv04-media-item__share {
+	opacity: 1;
+}
+
+/* Блок: справа от крестика блока. */
+.kv04-block-share {
+	top: 2px;
+	left: 26px;
+	width: 20px;
+	height: 20px;
+	font-size: 0.85rem;
+}
+
+.kv04-note:hover .kv04-block-share,
+.kv04-note:focus-within .kv04-block-share {
+	opacity: 1;
+}
+
+/* В правке кнопок обмена нет — они часть показа, а не текста. */
+.kv04-note__body[contenteditable="true"] .kv04-block-share {
+	display: none;
+}
+
 /* --- Media album grid (Telegram-like) --- */
 
 .kv04-media-grid {
@@ -845,7 +933,10 @@ body.kv04-lightbox-open {
 		max-width: min(92%, 360px);
 	}
 
-	.kv04-note__remove {
+	.kv04-note__remove,
+	.kv04-note__share,
+	.kv04-media-item__share,
+	.kv04-block-share {
 		opacity: 1;
 	}
 
@@ -926,6 +1017,71 @@ body.kv04-lightbox-open {
 
 /* Корзина. Удаление обратимо, поэтому подтверждения нет — здесь всё, что
    удалено и ещё не вычищено по сроку. */
+/* Окно ссылки на дневник — из той же семьи, что корзина: карточка над
+   лентой, а не всплывающее окно поверх всего. */
+.kv04-share {
+	margin-bottom: 1rem;
+	padding: 0.9rem 1rem;
+	border: 1px solid var(--kv04-border);
+	border-radius: var(--kv04-radius);
+	background: var(--kv04-card);
+}
+
+.kv04-share__head {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: baseline;
+	margin-bottom: 0.5rem;
+}
+
+.kv04-share__title {
+	font-weight: 600;
+}
+
+.kv04-share__head .kv04-btn {
+	margin-left: auto;
+}
+
+.kv04-share__note {
+	margin: 0 0 0.75rem;
+	font-size: 0.82rem;
+	color: var(--kv04-text-muted);
+}
+
+.kv04-share__url {
+	width: 100%;
+	margin-bottom: 0.75rem;
+	font-size: 0.85rem;
+}
+
+.kv04-share__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+/* Дневник, открытый по ссылке: та же лента, но без композера и кнопок. */
+.kv04-shared__badge {
+	font-size: 0.75rem;
+	color: var(--kv04-text-muted);
+	border: 1px solid var(--kv04-border);
+	border-radius: 999px;
+	padding: 0.15rem 0.6rem;
+	white-space: nowrap;
+}
+
+.kv04-shared__empty {
+	color: var(--kv04-text-muted);
+	font-size: 0.9rem;
+}
+
+/* По ссылке заметку не правят: курсор не должен обещать обратное. */
+.kv04-note--readonly,
+.kv04-note--readonly:not(.is-editing) {
+	cursor: default;
+}
+
 .kv04-trash {
 	margin-bottom: 1rem;
 	padding: 0.9rem 1rem;

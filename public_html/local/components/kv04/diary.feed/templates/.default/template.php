@@ -4,120 +4,11 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	die();
 }
 
-if (!function_exists('kv04DiaryRenderBlocks'))
-{
-	/**
-	 * Блок — то, что видно отдельным куском: код либо текст между блоками кода.
-	 * Разбор общий с фронтом, поэтому номера блоков совпадают.
-	 *
-	 * Разметку собираем строкой без единого лишнего пробела: тело заметки
-	 * выводится с white-space: pre-wrap и правится как contenteditable, поэтому
-	 * отступы шаблона между тегами стали бы частью текста и осели бы в базе
-	 * при первом же сохранении.
-	 */
-	function kv04DiaryRenderBlocks(string $text): string
-	{
-		$out = '';
-		foreach (\Kv04\Diary\NoteService::splitBlocks($text) as $index => $block)
-		{
-			$out .= '<div class="kv04-note__block" data-block="' . (int)$index . '">'
-				. $block['html']
-				. '<button type="button" class="kv04-block-remove" data-block-delete'
-				. ' aria-label="Удалить блок" title="Удалить блок">&times;</button>'
-				. '</div>';
-		}
+// Разметку заметок рисует общий файл модуля: ту же ленту показывает
+// страница, открытая по ссылке, и второй экземпляр этой разметки
+// разъехался бы с первым на первой же правке.
+require $_SERVER['DOCUMENT_ROOT'] . '/local/modules/kv04.diary/include/render-items.php';
 
-		return $out;
-	}
-}
-
-if (!function_exists('kv04DiaryRenderItems'))
-{
-	function kv04DiaryRenderItems(array $items): void
-	{
-		foreach ($items as $item)
-		{
-			$media = $item['media'] ?? [];
-			$mediaCount = count($media);
-			$gridCount = min(max($mediaCount, 1), 4);
-			$extraCount = $mediaCount > 4 ? $mediaCount - 3 : 0;
-			?>
-			<article class="kv04-note" data-id="<?=(int)$item['id']?>">
-				<?php if (!empty($item['text'])): ?>
-					<div class="kv04-note__body"><?=kv04DiaryRenderBlocks((string)$item['text'])?></div>
-				<?php endif; ?>
-				<?php if ($mediaCount > 0): ?>
-					<div class="kv04-note__media kv04-media-grid kv04-media-grid--<?=$gridCount?><?=$mediaCount > 4 ? ' kv04-media-grid--more' : ''?>">
-						<?php foreach ($media as $index => $file): ?>
-							<?php
-							$isOverflow = $mediaCount > 4 && $index >= 3;
-							if ($mediaCount > 4 && $index > 3)
-							{
-								continue;
-							}
-							?>
-							<?php if (!empty($file['is_image'])): ?>
-								<div class="kv04-media-item">
-									<button type="button"
-										class="kv04-media-thumb<?=$isOverflow ? ' kv04-media-thumb--more' : ''?>"
-										data-lightbox="image"
-										data-src="<?=htmlspecialcharsbx($file['src'])?>"
-										data-file-id="<?=(int)$file['id']?>"
-										aria-label="Открыть изображение">
-										<img src="<?=htmlspecialcharsbx($file['src'])?>" alt="" loading="lazy" decoding="async">
-										<?php if ($isOverflow): ?>
-											<span class="kv04-media-thumb__count">+<?=$extraCount?></span>
-										<?php endif; ?>
-									</button>
-									<?php if (!$isOverflow): ?>
-										<button type="button"
-											class="kv04-media-item__remove"
-											data-media-delete
-											data-file-id="<?=(int)$file['id']?>"
-											aria-label="Удалить файл">&times;</button>
-									<?php endif; ?>
-								</div>
-							<?php elseif (!empty($file['is_video'])): ?>
-								<div class="kv04-media-item">
-									<button type="button"
-										class="kv04-media-thumb kv04-media-thumb--video<?=$isOverflow ? ' kv04-media-thumb--more' : ''?>"
-										data-lightbox="video"
-										data-src="<?=htmlspecialcharsbx($file['src'])?>"
-										data-file-id="<?=(int)$file['id']?>"
-										aria-label="Открыть видео">
-										<?php /* #t=0.1 — не украшение: без метки времени Safari на iPhone
-										   рисует вместо миниатюры чёрный прямоугольник, потому что кадр
-										   декодируется только при воспроизведении. Просмотрщик берёт
-										   адрес из data-src, там метки нет. */ ?>
-										<video src="<?=htmlspecialcharsbx($file['src'])?>#t=0.1" muted playsinline preload="metadata"></video>
-										<span class="kv04-media-thumb__play" aria-hidden="true"></span>
-										<?php if ($isOverflow): ?>
-											<span class="kv04-media-thumb__count">+<?=$extraCount?></span>
-										<?php endif; ?>
-									</button>
-									<?php if (!$isOverflow): ?>
-										<button type="button"
-											class="kv04-media-item__remove"
-											data-media-delete
-											data-file-id="<?=(int)$file['id']?>"
-											aria-label="Удалить файл">&times;</button>
-									<?php endif; ?>
-								</div>
-							<?php endif; ?>
-						<?php endforeach; ?>
-					</div>
-				<?php endif; ?>
-				<div class="kv04-note__footer">
-					<time><?=htmlspecialcharsbx($item['date'])?></time>
-				</div>
-				<button type="button" class="kv04-note__remove" data-delete aria-label="Удалить заметку" title="Удалить заметку">&times;</button>
-			</article>
-			<?php
-		}
-	}
-}
-?>
-<?php
 $kv04Books = $arResult['BOOKS'] ?? [];
 $kv04CurrentBook = (int)($arResult['CURRENT_BOOK'] ?? 0);
 $kv04CurrentTitle = 'Мой дневник';
@@ -155,8 +46,23 @@ foreach ($kv04Books as $kv04Book)
 	<div class="kv04-feed__head">
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm kv04-feed__books" data-books-open>Дневники</button>
 		<h1 data-current-title title="Нажмите, чтобы переименовать"><?=htmlspecialcharsbx($kv04CurrentTitle)?></h1>
+		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-share-open>Поделиться</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-trash-open>Корзина</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-logout>Выйти</button>
+	</div>
+
+	<div class="kv04-share" data-share hidden>
+		<div class="kv04-share__head">
+			<span class="kv04-share__title">Ссылка на этот дневник</span>
+			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-share-close>Закрыть</button>
+		</div>
+		<p class="kv04-share__note">Ссылка живая: всё, что появится в этом дневнике дальше, тоже увидит тот, у кого она есть.</p>
+		<input type="text" class="kv04-input kv04-share__url" data-share-url readonly spellcheck="false" aria-label="Ссылка">
+		<div class="kv04-share__actions">
+			<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-share-send>Отправить</button>
+			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-share-copy>Скопировать</button>
+			<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-share-revoke>Закрыть доступ</button>
+		</div>
 	</div>
 
 	<div class="kv04-trash" data-trash hidden>
@@ -835,6 +741,15 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 		wrap.innerHTML = html;
 		linkify(wrap);
 
+		var share = document.createElement('button');
+		share.type = 'button';
+		share.className = 'kv04-block-share';
+		share.setAttribute('data-share-block', '');
+		share.setAttribute('aria-label', 'Поделиться блоком');
+		share.title = 'Поделиться';
+		share.innerHTML = '&#8599;';
+		wrap.appendChild(share);
+
 		var remove = document.createElement('button');
 		remove.type = 'button';
 		remove.className = 'kv04-block-remove';
@@ -880,6 +795,15 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 		// renderNoteMedia ищет .kv04-note__footer, поэтому только после append.
 		renderNoteMedia(note, item.media || []);
+
+		var shareNoteBtn = document.createElement('button');
+		shareNoteBtn.type = 'button';
+		shareNoteBtn.className = 'kv04-note__share';
+		shareNoteBtn.setAttribute('data-share-note', '');
+		shareNoteBtn.setAttribute('aria-label', 'Поделиться заметкой');
+		shareNoteBtn.title = 'Поделиться';
+		shareNoteBtn.innerHTML = '&#8599;';
+		note.appendChild(shareNoteBtn);
 
 		var remove = document.createElement('button');
 		remove.type = 'button';
@@ -1306,6 +1230,205 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 	markStoredClips();
 
+	// --- Поделиться --------------------------------------------------------
+	//
+	// Заметка, блок и файл ссылок не заводят вовсе: вызывается системное меню
+	// телефона, и артефакт уходит в выбранное приложение как есть. Это и
+	// честнее — дневник не начинает раздавать наружу адреса, — и ближе к тому,
+	// как обмен устроен на самом телефоне.
+	//
+	// Ссылка есть только у дневника целиком: она живая и работает до отзыва.
+	//
+	// Там, где системного меню нет (десктоп), текст уходит в буфер обмена, а
+	// файл открывается соседней вкладкой: копировать картинку в буфер умеют
+	// не все браузеры, а показать её — все.
+
+	function canShareFiles(files) {
+		return !!(navigator.canShare && files.length && navigator.canShare({ files: files }));
+	}
+
+	function copyOut(text) {
+		if (!text || !navigator.clipboard || !navigator.clipboard.writeText) {
+			setShotStatus('Здесь нечем поделиться', true);
+			return Promise.resolve(false);
+		}
+
+		return navigator.clipboard.writeText(text).then(function () {
+			setShotStatus('Скопировано', false);
+			return true;
+		}, function () {
+			setShotStatus('Не удалось скопировать', true);
+			return false;
+		});
+	}
+
+	function shareOut(payload, fallbackText) {
+		if (!navigator.share) return copyOut(fallbackText);
+
+		return navigator.share(payload).then(function () {
+			setShotStatus('', false);
+			return true;
+		}, function (err) {
+			// Человек закрыл системное меню — это не ошибка, и говорить об
+			// этом не надо.
+			if (err && err.name === 'AbortError') { setShotStatus('', false); return true; }
+			return copyOut(fallbackText);
+		});
+	}
+
+	// Текст узла без кнопок: крестик и стрелка живут внутри блока, и без
+	// такой прополки они уехали бы в отправленное сообщение.
+	function plainText(node) {
+		if (!node) return '';
+		var parts = [];
+		Array.prototype.forEach.call(node.childNodes, function (child) {
+			if (child.nodeType === 1 && child.tagName === 'BUTTON') return;
+			parts.push(child.nodeType === 1 ? (child.innerText || child.textContent || '') : (child.textContent || ''));
+		});
+
+		return parts.join('').replace(/\n{3,}/g, '\n\n').trim();
+	}
+
+	function noteText(note) {
+		var body = note ? note.querySelector('.kv04-note__body') : null;
+		if (!body) return '';
+		var blocks = body.querySelectorAll('.kv04-note__block');
+		if (!blocks.length) return plainText(body);
+
+		var parts = [];
+		Array.prototype.forEach.call(blocks, function (block) {
+			var text = plainText(block);
+			if (text) parts.push(text);
+		});
+
+		return parts.join('\n\n');
+	}
+
+	function fileFromThumb(thumb) {
+		var src = thumb.getAttribute('data-src');
+		if (!src) return Promise.reject();
+
+		return fetch(src).then(function (r) { return r.blob(); }).then(function (blob) {
+			var name = src.split('/').pop().split('?')[0] || 'file';
+			return new File([blob], name, { type: blob.type || 'application/octet-stream' });
+		});
+	}
+
+	function shareMedia(thumb) {
+		if (!thumb) return;
+		var src = thumb.getAttribute('data-src');
+		var url = location.origin + src;
+		setShotStatus('Готовлю файл…', false);
+
+		fileFromThumb(thumb).then(function (file) {
+			if (canShareFiles([file])) return shareOut({ files: [file] }, url);
+			// Браузер не умеет отдавать файл в системное меню — отдаём адрес.
+			return copyOut(url);
+		}).catch(function () {
+			setShotStatus('Не удалось забрать файл', true);
+		});
+	}
+
+	function shareNote(note) {
+		if (!note) return;
+		var text = noteText(note);
+		var thumbs = note.querySelectorAll('.kv04-media-thumb');
+
+		if (!thumbs.length) {
+			if (!text) { setShotStatus('В этой заметке нечем поделиться', true); return; }
+			shareOut({ text: text }, text);
+			return;
+		}
+
+		setShotStatus('Готовлю файлы…', false);
+		Promise.all(Array.prototype.map.call(thumbs, fileFromThumb)).then(function (files) {
+			var payload = canShareFiles(files) ? { files: files } : {};
+			if (text) payload.text = text;
+			if (!payload.files && !payload.text) { setShotStatus('В этой заметке нечем поделиться', true); return; }
+			return shareOut(payload, text || (location.origin + thumbs[0].getAttribute('data-src')));
+		}).catch(function () {
+			// Файлы не дались — уходит хотя бы текст.
+			if (text) shareOut({ text: text }, text);
+			else setShotStatus('Не удалось забрать файлы', true);
+		});
+	}
+
+	root.addEventListener('click', function (e) {
+		var btn = e.target.closest('[data-share-note], [data-share-block], [data-share-media]');
+		if (!btn || !root.contains(btn)) return;
+		e.preventDefault();
+		e.stopPropagation();
+
+		if (btn.hasAttribute('data-share-media')) {
+			var item = btn.closest('.kv04-media-item');
+			shareMedia(item ? item.querySelector('.kv04-media-thumb') : null);
+			return;
+		}
+
+		if (btn.hasAttribute('data-share-block')) {
+			var text = plainText(btn.closest('.kv04-note__block'));
+			if (!text) { setShotStatus('В этом блоке нечем поделиться', true); return; }
+			shareOut({ text: text }, text);
+			return;
+		}
+
+		shareNote(btn.closest('.kv04-note'));
+	});
+
+	// --- Ссылка на дневник --------------------------------------------------
+
+	var shareBox = root.querySelector('[data-share]');
+	var shareUrlField = shareBox ? shareBox.querySelector('[data-share-url]') : null;
+	var shareOpen = root.querySelector('[data-share-open]');
+	var shareUrl = '<?=CUtil::JSEscape((string)($arResult['SHARE_URL'] ?? ''))?>';
+
+	function showShareBox(url) {
+		shareUrl = url || '';
+		if (!shareBox || !shareUrlField) return;
+		shareUrlField.value = shareUrl;
+		shareBox.hidden = false;
+		shareUrlField.focus();
+		shareUrlField.select();
+	}
+
+	if (shareOpen) {
+		shareOpen.addEventListener('click', function () {
+			// Ссылка на дневник одна: если она уже есть, показываем ту же, а не
+			// заводим вторую. Отозванная не воскресает — будет новая.
+			if (shareUrl) { showShareBox(shareUrl); return; }
+
+			setShotStatus('Готовлю ссылку…', false);
+			post({ action: 'share_book' }).then(function (data) {
+				if (!data.ok) { setShotStatus(data.error || 'Ошибка', true); return; }
+				setShotStatus('', false);
+				showShareBox(data.url);
+			}).catch(function () { setShotStatus('Нет связи', true); });
+		});
+	}
+
+	if (shareBox) {
+		shareBox.addEventListener('click', function (e) {
+			if (e.target.closest('[data-share-close]')) { shareBox.hidden = true; return; }
+
+			if (e.target.closest('[data-share-copy]')) { copyOut(shareUrl); return; }
+
+			if (e.target.closest('[data-share-send]')) {
+				var title = currentTitle ? currentTitle.textContent : 'Дневник';
+				shareOut({ title: title, url: shareUrl }, shareUrl);
+				return;
+			}
+
+			if (e.target.closest('[data-share-revoke]')) {
+				post({ action: 'share_revoke' }).then(function (data) {
+					if (!data.ok) { setShotStatus(data.error || 'Ошибка', true); return; }
+					shareUrl = '';
+					shareBox.hidden = true;
+					setShotStatus('Доступ закрыт. Прежняя ссылка больше не откроется', false);
+				}).catch(function () { setShotStatus('Нет связи', true); });
+			}
+		});
+	}
+
 	bindEditor(input, {
 		onSave: submitComposer,
 		onImages: function (files) { setPendingFiles(files, true); }
@@ -1398,7 +1521,7 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 	function isNoteEditClick(e, note) {
 		if (note.classList.contains('is-editing')) return false;
-		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], .kv04-edit-bar, a[href]')) {
+		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], [data-share-note], [data-share-block], [data-share-media], .kv04-edit-bar, a[href]')) {
 			return false;
 		}
 		return e.target.closest('.kv04-note') === note;
@@ -1461,6 +1584,15 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 
 			item.appendChild(thumb);
 			if (!isOverflow) {
+				var shareFile = document.createElement('button');
+				shareFile.type = 'button';
+				shareFile.className = 'kv04-media-item__share';
+				shareFile.setAttribute('data-share-media', '');
+				shareFile.setAttribute('aria-label', 'Поделиться файлом');
+				shareFile.title = 'Поделиться';
+				shareFile.innerHTML = '&#8599;';
+				item.appendChild(shareFile);
+
 				var remove = document.createElement('button');
 				remove.type = 'button';
 				remove.className = 'kv04-media-item__remove';
@@ -1819,6 +1951,10 @@ $kv04HljsVersion = (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04HljsSrc);
 			if (!data.ok) { alert(data.error || 'Ошибка'); return; }
 			// Лента приходит готовой — перезагружать страницу ради смены
 			// дневника незачем.
+			// Ссылка у каждого дневника своя: показывать чужую после
+			// переключения было бы прямой ошибкой.
+			shareUrl = data.share_url || '';
+			if (shareBox) shareBox.hidden = true;
 			list.innerHTML = '';
 			(data.items || []).forEach(function (item) {
 				list.appendChild(createNoteElement(item));

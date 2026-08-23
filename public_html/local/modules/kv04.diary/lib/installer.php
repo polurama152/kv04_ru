@@ -26,8 +26,9 @@ class Installer
 	 * каждом сервере. 2: таблица попыток входа. 3: UF_EMAIL.
 	 * 4: свойство DELETED_AT под корзину. 5: таблица обрывков заметок.
 	 * 6: таблица дневников и свойство BOOK у заметок.
+	 * 7: таблица ссылок, которыми делятся дневником.
 	 */
-	private const SCHEMA_VERSION = '6';
+	private const SCHEMA_VERSION = '7';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -69,6 +70,7 @@ class Installer
 		self::ensureAttemptsTable();
 		self::ensureTrashTable();
 		self::ensureBooksTable();
+		self::ensureSharesTable();
 
 		self::setOption('hlblock_id', (string)$hlId);
 		self::setOption('iblock_id', (string)$iblockId);
@@ -157,6 +159,35 @@ class Installer
 			. 'CREATED_AT INT NOT NULL DEFAULT 0,'
 			. 'PRIMARY KEY (ID),'
 			. 'INDEX IX_KV04_DIARY_BOOKS_OWNER (OWNER_ID, SORT, ID)'
+			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
+	}
+
+	/**
+	 * Ссылки, которыми поделились дневником. Токен уникален: по нему идёт
+	 * единственный поиск, и он же не даёт завести две одинаковые ссылки.
+	 * Отозванные строки не удаляем — по ним видно, что доступ был и когда
+	 * его закрыли.
+	 */
+	private static function ensureSharesTable(): void
+	{
+		$connection = Application::getConnection();
+		if ($connection->isTableExists(ShareService::TABLE))
+		{
+			return;
+		}
+
+		$connection->queryExecute(
+			'CREATE TABLE IF NOT EXISTS ' . ShareService::TABLE . ' ('
+			. 'ID INT NOT NULL AUTO_INCREMENT,'
+			. 'OWNER_ID VARCHAR(40) NOT NULL,'
+			. 'BOOK_ID INT NOT NULL,'
+			. 'TOKEN CHAR(32) NOT NULL,'
+			. 'CREATED_AT INT NOT NULL DEFAULT 0,'
+			. 'REVOKED_AT INT NOT NULL DEFAULT 0,'
+			. 'PRIMARY KEY (ID),'
+			. 'UNIQUE INDEX UX_KV04_DIARY_SHARES_TOKEN (TOKEN),'
+			. 'INDEX IX_KV04_DIARY_SHARES_BOOK (OWNER_ID, BOOK_ID, REVOKED_AT)'
 			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
 		);
 	}
