@@ -56,23 +56,29 @@ flowchart TD
 | `local/modules/kv04.diary/lib/pinservice.php` | Почта как идентичность, HMAC пина |
 | `local/modules/kv04.diary/lib/attemptlimiter.php` | Лестница блокировок, своя таблица |
 | `local/modules/kv04.diary/lib/bookservice.php` | Дневники владельца, до 50 |
+| `local/modules/kv04.diary/lib/shareservice.php` | Ссылки на дневник: выдача, отзыв, разбор |
+| `local/modules/kv04.diary/include/render-items.php` | Разметка заметок, общая для ленты и ссылки |
 | `local/modules/kv04.diary/lib/noteservice.php` | CRUD заметок, MEDIA, корзина |
 | `local/modules/kv04.diary/lib/html.php` | sanitize, изоляция `<pre>` |
 | `local/modules/kv04.diary/assets/diary-theme.css` | Общая тёмная тема |
 | `local/modules/kv04.diary/assets/highlight/` | highlight.js 11.9.0, свой, не cdnjs |
 | `local/components/kv04/diary.pin/` | Вход / создание |
 | `local/components/kv04/diary.feed/` | Лента, AJAX |
+| `local/components/kv04/diary.share/` | Дневник по ссылке, только чтение |
 | `local/php_interface/init.php` | Подключает `load.php` |
 
 ## Данные
 
 - HL `Kv04DiaryKey` / таблица `kv04_diary_keys`: `UF_PIN_HASH`, `UF_OWNER_ID`, `UF_EMAIL`, `UF_FAILS`, `UF_LOCKED_UNTIL`
-- Свои таблицы: `kv04_diary_attempts` (лестница блокировок), `kv04_diary_books` (дневники), `kv04_diary_trash` (обрывки в корзине)
+- Свои таблицы: `kv04_diary_attempts` (лестница блокировок), `kv04_diary_books` (дневники), `kv04_diary_trash` (обрывки в корзине), `kv04_diary_shares` (ссылки на дневники)
 - Инфоблок тип `kv04`, код `diary`: `OWNER`, `BOOK`, `MEDIA` (файл, multiple), `DELETED_AT`. Удалённое — `ACTIVE = N`
-- Option модуля `kv04.diary`: `pepper`, `hlblock_id`, `iblock_id`, `schema_version` (сейчас 6)
+- Option модуля `kv04.diary`: `pepper`, `hlblock_id`, `iblock_id`, `schema_version` (сейчас 7)
+- В памяти браузера (IndexedDB `kv04-diary-clips`): полные видеоролики, ключ — номер заметки. На сервер они не уезжают
 - Cookie: `KV04_DIARY` (сессия, 10 ч), `KV04_DIARY_DEVICE` (привязка браузера, год)
 
-POST feed: `add`, `edit`, `delete`, `restore`, `delete_block`, `restore_fragment`, `attach`, `detach_media`, `trash`, `book_create`, `book_rename`, `book_delete`, `book_switch`, `attach_email`, `logout`. Pin: вход без action, `create`, `forget_device`, `logout`. Всегда `check_bitrix_sessid()`.
+POST feed: `add`, `edit`, `delete`, `restore`, `delete_block`, `restore_fragment`, `attach`, `detach_media`, `trash`, `book_create`, `book_rename`, `book_delete`, `book_switch`, `attach_email`, `share_book`, `share_revoke`, `logout`. Pin: вход без action, `create`, `forget_device`, `logout`. Всегда `check_bitrix_sessid()`.
+
+Страницы: `/` — пин-пад или лента; `/d/<32 hex>` — дневник по ссылке, только чтение, разбирается в `index.php` до проверки входа.
 
 ## Deploy и проверка
 
