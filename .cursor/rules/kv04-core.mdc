@@ -31,3 +31,9 @@ alwaysApply: true
 ## Deploy
 
 PhpStorm `autoUpload=Always` на сервер `kv04`. SSH: `infopolura@77.222.40.47`, путь `/home/i/infopolura/kv04_ru/public_html/`. Проверка: `curl -sS -o NUL -w "%{http_code}" https://kv04.ru/`.
+
+autoUpload возит правки только при открытой IDE. Правки из CLI довозить
+`bin/deploy.sh` (сверка md5 кастома + scp; `--check` — только сверка).
+После выкладки — `bin/smoke.sh`: строго читающий смоук, exit 1 при провале.
+Веб kv04.ru на PHP 8.4; в консоли сервера по умолчанию 5.2 — бинарь звать
+явно (`/usr/bin/php8.4`).
