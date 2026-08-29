@@ -1403,6 +1403,19 @@ body.kv04-lightbox-open {
 	font-size: 0.78rem;
 }
 
+/* Тихий ход в админку: рендерится только Bitrix-админу. */
+.kv04-books__admin {
+	margin-top: auto;
+	padding-top: 0.5rem;
+	color: var(--kv04-text-muted);
+	font-size: 0.78rem;
+	text-decoration: none;
+}
+
+.kv04-books__admin:hover {
+	color: var(--kv04-accent);
+}
+
 .kv04-books__backdrop {
 	display: none;
 }

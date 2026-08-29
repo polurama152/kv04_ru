@@ -42,6 +42,10 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		// без неё он остаётся в переходной ветке, где пин ищется глобально.
 		$this->arResult['NEEDS_EMAIL'] = !PinService::hasEmail($ownerId);
 		$this->arResult['TRASH_DAYS'] = (int)ceil(NoteService::TRASH_TTL / 86400);
+		// Bitrix-сессия живёт отдельно от пин-входа: если лентой пользуется
+		// залогиненный админ сайта, ему показывается тихий ход в админку.
+		global $USER;
+		$this->arResult['SHOW_ADMIN_LINK'] = is_object($USER) && $USER->IsAdmin();
 		// Планировщика у модуля нет, агенты Bitrix на этом хостинге не крутятся,
 		// поэтому просроченное чистим изредка на показе ленты — и всегда при
 		// открытии корзины.

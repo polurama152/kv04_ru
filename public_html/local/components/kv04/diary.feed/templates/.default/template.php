@@ -38,6 +38,9 @@ foreach ($kv04Books as $kv04Book)
 	</div>
 	<button type="button" class="kv04-books__add" data-book-add>+ Новый дневник</button>
 	<p class="kv04-books__limit" data-books-limit hidden></p>
+	<?php if (!empty($arResult['SHOW_ADMIN_LINK'])): ?>
+		<a class="kv04-books__admin" href="/bitrix/admin/">Админка</a>
+	<?php endif; ?>
 </aside>
 
 <div class="kv04-books__backdrop" data-books-backdrop></div>
