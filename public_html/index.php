@@ -76,6 +76,12 @@ if ($kv04DiaryFeed || $kv04DiaryShare)
 	<?php /* Личный дневник не должен попасть в поиск, даже если ссылкой
 	   поделились в открытом чате и её подобрал робот. */ ?>
 	<meta name="robots" content="noindex, nofollow">
+	<?php else: ?>
+	<?php /* PWA — только своя страница: гостю по share-ссылке установка ни к чему. */ ?>
+	<link rel="manifest" href="<?= htmlspecialcharsbx($kv04DiaryAsset('/local/modules/kv04.diary/assets/pwa/manifest.webmanifest')) ?>">
+	<link rel="apple-touch-icon" href="/local/modules/kv04.diary/assets/pwa/apple-touch-icon.png">
+	<meta name="application-name" content="Дневник">
+	<meta name="apple-mobile-web-app-title" content="Дневник">
 	<?php endif; ?>
 </head>
 <body class="kv04-diary-body">
@@ -124,6 +130,13 @@ else
 ?>
 </div>
 </div>
+<?php if ($kv04DiaryToken === ''): ?>
+<script>
+	if ('serviceWorker' in navigator) {
+		navigator.serviceWorker.register('/sw.js');
+	}
+</script>
+<?php endif; ?>
 </body>
 </html>
 <?php

@@ -63,3 +63,12 @@ ErrorDocument 404 /404.php
 	ExpiresByType text/css "access plus 3 day"
 	ExpiresByType application/javascript "access plus 3 day"
 </IfModule>
+
+# Новый сервис-воркер должен подхватываться сразу, а не через трое суток
+# ExpiresByType выше. Без mod_headers деградация мягкая: браузер и сам
+# сверяет sw.js не реже раза в сутки.
+<IfModule mod_headers.c>
+	<Files "sw.js">
+		Header set Cache-Control "no-cache"
+	</Files>
+</IfModule>
