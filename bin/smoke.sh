@@ -14,12 +14,32 @@ SITE=https://kv04.ru
 # В консоли сервера PHP по умолчанию 5.2 — бинарь указываем явно.
 # Веб kv04.ru работает на 8.4 (phpinfo, 2026-08-29) — линтуем той же версией.
 PHP_BIN=/usr/bin/php8.4
-# Путь дневника (опция kv04.diary → path). Пусто — дневник на корне.
-# Менять синхронно с настройкой в приложении или админке.
-DIARY_PATH=uday
-# Прежний адрес: с него обязан идти 301, иначе установленные приложения
-# после переезда открывали бы 404 (спека 0004).
-LEGACY_PATH=day
+# Путь дневника и прежние адреса скрипт не знает наизусть: их правят из
+# приложения в любой момент, и зашитое значение устарело бы на следующий день.
+# Спрашиваем у сайта — опции kv04.diary на боевом сервере.
+DIARY_CONF=$(ssh -o BatchMode=yes "$HOST" "KV04_ROOT='$REMOTE_ROOT' /usr/bin/php8.4" <<'PHP' 2>/dev/null
+<?php
+include getenv('KV04_ROOT') . '/public_html/bitrix/php_interface/dbconn.php';
+$m = @new mysqli($DBHost, $DBLogin, $DBPassword, $DBName);
+if ($m->connect_error) { exit(1); }
+$r = $m->query("SELECT NAME, VALUE FROM b_option WHERE MODULE_ID='kv04.diary' AND NAME IN ('path','legacy_paths')");
+$path = '';
+$legacy = '';
+while ($row = $r->fetch_assoc())
+{
+	if ($row['NAME'] === 'path') { $path = $row['VALUE']; continue; }
+	$list = json_decode($row['VALUE'], true);
+	$legacy = is_array($list) && $list ? (string)$list[0] : '';
+}
+echo $path, '|', $legacy;
+PHP
+)
+DIARY_PATH="${DIARY_CONF%%|*}"
+LEGACY_PATH="${DIARY_CONF#*|}"
+if [ -z "$DIARY_CONF" ]; then
+	echo 'FAIL не удалось прочитать настройки дневника с сервера'
+	exit 1
+fi
 
 cd "$(dirname "$0")/.." || exit 2
 

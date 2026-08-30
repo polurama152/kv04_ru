@@ -52,6 +52,16 @@ if ($kv04DiaryLoaded && $kv04DiaryToken === '')
 		$kv04DiarySlugOwner = $kv04DiarySlug === ''
 			? ''
 			: (string)(SlugService::ownerBySlug($kv04DiarySlug) ?? '');
+
+		// Владелец переехал: его приложение приводим на общую страницу.
+		// Новый адрес не подставляем намеренно — адрес меняют в том числе
+		// чтобы уйти от тех, кто знал прежний.
+		if ($kv04DiarySlugOwner === '' && $kv04DiarySlug !== '' && SlugService::isMoved($kv04DiarySlug))
+		{
+			CHTTP::SetStatus('301 Moved Permanently');
+			header('Location: ' . Path::url());
+			die();
+		}
 	}
 }
 

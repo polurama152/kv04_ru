@@ -6,6 +6,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 
 use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
+use Kv04\Diary\Path;
 use Kv04\Diary\PinService;
 
 class Kv04DiaryPinComponent extends CBitrixComponent
@@ -33,6 +34,8 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 		// существует он или нет.
 		$this->arResult['BOUND'] = Auth::boundOwnerId() !== null || $this->slugOwner() !== null;
 		$this->arResult['NEEDS_EMAIL'] = $this->slugOwner() === null && PinService::needsEmail();
+		// Адрес в регистрации обязателен, почта — нет: см. спеку 0006.
+		$this->arResult['DIARY_URL'] = Path::url();
 		$this->includeComponentTemplate();
 	}
 
@@ -58,8 +61,15 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 
 		if ($action === 'create')
 		{
-			$result = PinService::create($email, $pin, (string)$this->request->getPost('pin_confirm'));
-			$result['reload'] = !empty($result['ok']);
+			$result = PinService::create(
+				(string)$this->request->getPost('slug'),
+				$pin,
+				(string)$this->request->getPost('pin_confirm'),
+				$email
+			);
+			// Дневник заводится сразу на своём адресе — туда и уходим:
+			// с него ставится приложение, и он же дальше служит входом.
+			$result['reload'] = !empty($result['ok']) && empty($result['url']);
 			$this->json($result);
 			return;
 		}

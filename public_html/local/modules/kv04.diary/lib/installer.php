@@ -29,8 +29,9 @@ class Installer
 	 * 7: таблица ссылок, которыми делятся дневником.
 	 * 8: опция пути дневника и rewrite-правила под неё.
 	 * 9: таблица личных адресов владельцев.
+	 * 10: адрес пережил переезд — колонка MOVED_AT, у владельца несколько строк.
 	 */
-	private const SCHEMA_VERSION = '9';
+	private const SCHEMA_VERSION = '10';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -74,6 +75,7 @@ class Installer
 		self::ensureBooksTable();
 		self::ensureSharesTable();
 		self::ensureSlugsTable();
+		self::upgradeSlugsTable();
 		// Опция пути: живой сайт без неё продолжает жить на корне ('').
 		// Правила перекладываются здесь же, чтобы клиенту Маркетплейса
 		// хватило установки модуля без ручных шагов.
@@ -204,10 +206,10 @@ class Installer
 	}
 
 	/**
-	 * Личные адреса дневников. Уникальны оба ключа: адрес — потому что по нему
-	 * идёт поиск и два одинаковых развели бы владельцев по одной двери,
-	 * владелец — потому что адрес у него один (апсерт в SlugService::save
-	 * опирается на этот индекс).
+	 * Личные адреса дневников. Уникален адрес: два одинаковых развели бы
+	 * владельцев по одной двери. По владельцу уникальности нет — у него
+	 * действующий адрес один (MOVED_AT = 0), а прежние остаются рядом,
+	 * чтобы не достаться чужим и не сломать установленное приложение.
 	 */
 	private static function ensureSlugsTable(): void
 	{
@@ -223,10 +225,44 @@ class Installer
 			. 'OWNER_ID VARCHAR(40) NOT NULL,'
 			. 'SLUG VARCHAR(32) NOT NULL,'
 			. 'CREATED_AT INT NOT NULL DEFAULT 0,'
+			. 'MOVED_AT INT NOT NULL DEFAULT 0,'
 			. 'PRIMARY KEY (ID),'
-			. 'UNIQUE INDEX UX_KV04_DIARY_SLUGS_OWNER (OWNER_ID),'
+			. 'INDEX IX_KV04_DIARY_SLUGS_OWNER (OWNER_ID, MOVED_AT),'
 			. 'UNIQUE INDEX UX_KV04_DIARY_SLUGS_SLUG (SLUG)'
 			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
+	}
+
+	/**
+	 * Схема 9 знала один адрес на владельца, схема 10 хранит и прежние.
+	 * Уникальность по владельцу снимаем, по адресу — оставляем: он один
+	 * на всю площадку, кем бы ни был занят.
+	 */
+	private static function upgradeSlugsTable(): void
+	{
+		$connection = Application::getConnection();
+		if (!$connection->isTableExists(SlugService::TABLE))
+		{
+			return;
+		}
+
+		$fields = $connection->getTableFields(SlugService::TABLE);
+		if (isset($fields['MOVED_AT']))
+		{
+			return;
+		}
+
+		$connection->queryExecute('ALTER TABLE ' . SlugService::TABLE . ' ADD COLUMN MOVED_AT INT NOT NULL DEFAULT 0');
+		try
+		{
+			$connection->queryExecute('ALTER TABLE ' . SlugService::TABLE . ' DROP INDEX UX_KV04_DIARY_SLUGS_OWNER');
+		}
+		catch (\Throwable $e)
+		{
+			// Индекса могло не быть — таблица уже нужной формы.
+		}
+		$connection->queryExecute(
+			'ALTER TABLE ' . SlugService::TABLE . ' ADD INDEX IX_KV04_DIARY_SLUGS_OWNER (OWNER_ID, MOVED_AT)'
 		);
 	}
 

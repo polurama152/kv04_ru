@@ -153,6 +153,48 @@
 	font-size: 1rem;
 }
 
+/* Адрес дневника — первое поле регистрации: он и имя, и дверь, и адрес
+   приложения на телефоне. Домен рядом с полем, чтобы было видно, что
+   получится, а не абстрактное «имя пользователя». */
+.kv04-pin__slug {
+	margin-bottom: 1.25rem;
+	text-align: left;
+}
+
+.kv04-pin__slug label {
+	display: block;
+	margin-bottom: 0.5rem;
+	color: var(--kv04-text-muted);
+	font-size: 0.9rem;
+}
+
+.kv04-pin__slug-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.kv04-pin__origin {
+	color: var(--kv04-text-muted);
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+.kv04-pin__slug-row input {
+	flex: 1 1 7rem;
+	min-width: 5rem;
+	box-sizing: border-box;
+	font-size: 1rem;
+}
+
+.kv04-pin__slug-note {
+	margin: 0.5rem 0 0;
+	color: var(--kv04-text-muted);
+	font-size: 0.78rem;
+	line-height: 1.4;
+}
+
 .kv04-pin__forget {
 	display: block;
 	margin: 1.25rem auto 0;

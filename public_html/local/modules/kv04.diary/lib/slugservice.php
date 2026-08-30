@@ -5,13 +5,18 @@ namespace Kv04\Diary;
 use Bitrix\Main\Application;
 
 /**
- * Личный адрес дневника: /<путь>/<адрес>/. Нужен не для красоты — по нему
- * браузер ставит ОТДЕЛЬНОЕ приложение (свой scope, свой значок), поэтому на
- * общем телефоне у каждого владельца свой дневник на экране.
+ * Личный адрес дневника: /<путь>/<адрес>/. Он же идентичность владельца —
+ * его спрашивают при регистрации вместо почты, — и он же адрес приложения:
+ * по нему браузер ставит ОТДЕЛЬНЫЙ PWA со своим значком.
  *
- * Адрес публичен и потому не секрет: он говорит «чей это дневник», а пускает
- * по-прежнему пин. Незнакомый адрес обязан вести себя как чужой — см.
- * PinService::login() и комментарий про неотличимость.
+ * Адрес публичен и потому не секрет: он говорит «чей это дневник», пускает
+ * по-прежнему пин. Занятость адреса сообщаем прямо (решение владельца от
+ * 2026-08-31): адреса — публичные факты, как ники, и прятать их, ломая
+ * понятность регистрации, смысла нет.
+ *
+ * Прежние адреса не отдаются другим: строка остаётся с MOVED_AT > 0 и ведёт
+ * на общую страницу. Так установленное приложение переживает переезд, а
+ * новый адрес посторонним не выдаётся.
  */
 class SlugService
 {
@@ -30,7 +35,7 @@ class SlugService
 		}
 
 		$row = Application::getConnection()->query(
-			'SELECT SLUG FROM ' . self::TABLE . " WHERE OWNER_ID = '" . self::escape($ownerId) . "' LIMIT 1"
+			'SELECT SLUG FROM ' . self::TABLE . " WHERE OWNER_ID = '" . self::escape($ownerId) . "' AND MOVED_AT = 0 LIMIT 1"
 		)->fetch();
 
 		return $row ? (string)$row['SLUG'] : '';
@@ -46,10 +51,41 @@ class SlugService
 		}
 
 		$row = Application::getConnection()->query(
-			'SELECT OWNER_ID FROM ' . self::TABLE . " WHERE SLUG = '" . self::escape($slug) . "' LIMIT 1"
+			'SELECT OWNER_ID FROM ' . self::TABLE . " WHERE SLUG = '" . self::escape($slug) . "' AND MOVED_AT = 0 LIMIT 1"
 		)->fetch();
 
 		return $row ? (string)$row['OWNER_ID'] : null;
+	}
+
+	/** Адрес, с которого владелец переехал: ведёт на общую страницу. */
+	public static function isMoved(string $slug): bool
+	{
+		$slug = self::normalize($slug);
+		if ($slug === null)
+		{
+			return false;
+		}
+
+		$row = Application::getConnection()->query(
+			'SELECT ID FROM ' . self::TABLE . " WHERE SLUG = '" . self::escape($slug) . "' AND MOVED_AT > 0 LIMIT 1"
+		)->fetch();
+
+		return (bool)$row;
+	}
+
+	/** Адрес занят кем угодно — действующим владельцем или переехавшим. */
+	public static function isTaken(string $slug, string $exceptOwnerId = ''): bool
+	{
+		$slug = self::normalize($slug);
+		if ($slug === null)
+		{
+			return false;
+		}
+
+		$sql = 'SELECT OWNER_ID FROM ' . self::TABLE . " WHERE SLUG = '" . self::escape($slug) . "' LIMIT 1";
+		$row = Application::getConnection()->query($sql)->fetch();
+
+		return $row && (string)$row['OWNER_ID'] !== $exceptOwnerId;
 	}
 
 	/**
@@ -77,9 +113,12 @@ class SlugService
 	}
 
 	/**
-	 * Завести или сменить адрес. Пустой ввод стирает его: дневник остаётся на
-	 * общем адресе. Занятость чужого адреса сообщаем — иначе непонятно, почему
-	 * не сохраняется, а секрета в этом нет: адреса и так публичны.
+	 * Завести или сменить адрес. Прежний не стирается и не достаётся другим:
+	 * он помечается переехавшим и дальше ведёт на общую страницу — иначе
+	 * установленное приложение владельца открывало бы чужую дверь.
+	 *
+	 * Пустой ввод — «жить на общей странице»: действующий адрес тоже уходит
+	 * в переехавшие.
 	 */
 	public static function save(string $ownerId, string $input): array
 	{
@@ -90,10 +129,11 @@ class SlugService
 
 		$connection = Application::getConnection();
 		$owner = self::escape($ownerId);
+		$current = self::forOwner($ownerId);
 
 		if (trim($input) === '')
 		{
-			$connection->queryExecute('DELETE FROM ' . self::TABLE . " WHERE OWNER_ID = '" . $owner . "'");
+			self::retire($ownerId);
 
 			return ['ok' => true, 'slug' => ''];
 		}
@@ -104,19 +144,43 @@ class SlugService
 			return ['ok' => false, 'error' => 'Адрес: латиница и цифры, от ' . self::MIN . ' до ' . self::MAX . ' знаков, дефис и подчёркивание внутри'];
 		}
 
-		$taken = self::ownerBySlug($slug);
-		if ($taken !== null && $taken !== $ownerId)
+		if ($slug === $current)
+		{
+			return ['ok' => true, 'slug' => $slug];
+		}
+
+		if (self::isTaken($slug, $ownerId))
 		{
 			return ['ok' => false, 'error' => 'Такой адрес уже занят'];
 		}
 
 		$escaped = self::escape($slug);
+		// Свой же прежний адрес можно занять обратно: снимаем с него метку
+		// переезда, а не заводим вторую строку — SLUG уникален.
 		$connection->queryExecute(
-			'INSERT INTO ' . self::TABLE . " (OWNER_ID, SLUG, CREATED_AT) VALUES ('" . $owner . "', '" . $escaped . "', " . time() . ')'
-			. " ON DUPLICATE KEY UPDATE SLUG = '" . $escaped . "'"
+			'UPDATE ' . self::TABLE . " SET MOVED_AT = 0, CREATED_AT = " . time()
+			. " WHERE OWNER_ID = '" . $owner . "' AND SLUG = '" . $escaped . "'"
+		);
+		self::retire($ownerId, $slug);
+		$connection->queryExecute(
+			'INSERT IGNORE INTO ' . self::TABLE . " (OWNER_ID, SLUG, CREATED_AT, MOVED_AT)"
+			. " VALUES ('" . $owner . "', '" . $escaped . "', " . time() . ', 0)'
 		);
 
 		return ['ok' => true, 'slug' => $slug];
+	}
+
+	/** Отправить действующий адрес владельца в переехавшие. */
+	private static function retire(string $ownerId, string $keepSlug = ''): void
+	{
+		$sql = 'UPDATE ' . self::TABLE . ' SET MOVED_AT = ' . time()
+			. " WHERE OWNER_ID = '" . self::escape($ownerId) . "' AND MOVED_AT = 0";
+		if ($keepSlug !== '')
+		{
+			$sql .= " AND SLUG <> '" . self::escape($keepSlug) . "'";
+		}
+
+		Application::getConnection()->queryExecute($sql);
 	}
 
 	/** Владелец ушёл — адрес освобождается. */

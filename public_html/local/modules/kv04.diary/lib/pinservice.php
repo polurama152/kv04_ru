@@ -32,8 +32,9 @@ class PinService
 	}
 
 	/**
-	 * Вход. Аккаунт определяется по порядку: привязка устройства, затем почта,
-	 * затем legacy-поиск по пину для записей, у которых почты ещё нет.
+	 * Вход. Аккаунт определяется по порядку: привязка устройства, затем то,
+	 * что набрали в поле «почта или адрес», затем legacy-поиск по пину для
+	 * записей, у которых нет ни того, ни другого.
 	 *
 	 * Раньше запись искали по хэшу пина во всём пространстве 10 000 комбинаций,
 	 * поэтому вероятность попасть в ЧУЖОЙ дневник равнялась N/10 000: при
@@ -108,7 +109,13 @@ class PinService
 			: ['ok' => false, 'error' => self::wrongCredentialsMessage($email)];
 	}
 
-	public static function create(string $email, string $pin, string $confirm): array
+	/**
+	 * Регистрация. Спрашиваем АДРЕС, а не почту: адрес — публичное имя
+	 * дневника, он же дверь и он же адрес приложения на телефоне. Почта
+	 * необязательна и нужна только как путь назад, если адрес или пин забыты;
+	 * её можно добавить позже полоской в ленте.
+	 */
+	public static function create(string $slug, string $pin, string $confirm, string $email = ''): array
 	{
 		$pin = self::normalize($pin);
 		$confirm = self::normalize($confirm);
@@ -117,10 +124,10 @@ class PinService
 			return ['ok' => false, 'error' => 'Пины не совпадают'];
 		}
 
-		$email = self::normalizeEmail($email);
-		if (!self::isValidEmail($email))
+		$slugCanonical = SlugService::normalize($slug);
+		if ($slugCanonical === null)
 		{
-			return ['ok' => false, 'error' => 'Введите почту'];
+			return ['ok' => false, 'error' => 'Адрес: латиница и цифры, от 2 до 32 знаков, дефис и подчёркивание внутри'];
 		}
 
 		$ipKey = AttemptLimiter::ipKey(self::remoteAddress());
@@ -130,17 +137,33 @@ class PinService
 			return self::lockedResult($ipState['wait']);
 		}
 
-		// Занятость ПОЧТЫ сообщать приходится — иначе человек не поймёт, почему
-		// не создаётся дневник. В отличие от прежнего «такой пин занят», это не
-		// раскрывает секрет: зная почту, войти всё равно нельзя. Плюс попытка
-		// стоит места в лестнице, так что перечислить чужие адреса не выйдет.
-		if (self::findByEmail($email))
+		// Занятость адреса сообщаем прямо: адреса публичны, как ники, и молчать
+		// о них значило бы сделать регистрацию непонятной. Попытка стоит места
+		// в лестнице по IP, поэтому перечислять их подряд дорого.
+		if (SlugService::isTaken($slugCanonical))
 		{
 			$after = AttemptLimiter::registerFail($ipKey);
 
 			return $after['locked']
 				? self::lockedResult($after['wait'])
-				: ['ok' => false, 'error' => 'На эту почту дневник уже заведён'];
+				: ['ok' => false, 'error' => 'Такой адрес занят — придумайте другой'];
+		}
+
+		$email = self::normalizeEmail($email);
+		if ($email !== '')
+		{
+			if (!self::isValidEmail($email))
+			{
+				return ['ok' => false, 'error' => 'Почта написана с ошибкой — исправьте или оставьте поле пустым'];
+			}
+			if (self::findByEmail($email))
+			{
+				$after = AttemptLimiter::registerFail($ipKey);
+
+				return $after['locked']
+					? self::lockedResult($after['wait'])
+					: ['ok' => false, 'error' => 'На эту почту дневник уже заведён'];
+			}
 		}
 
 		$dataClass = self::dataClass();
@@ -157,9 +180,19 @@ class PinService
 			return ['ok' => false, 'error' => 'Не удалось создать дневник'];
 		}
 
+		$saved = SlugService::save($ownerId, $slugCanonical);
+		if (empty($saved['ok']))
+		{
+			// Адрес перехватили между проверкой и записью — редкость, но дневник
+			// уже создан: пусть живёт на общей странице, адрес выберут в настройках.
+			Auth::login($ownerId);
+
+			return ['ok' => true, 'url' => Path::url(), 'warning' => 'Адрес занять не удалось — выберите другой в настройках'];
+		}
+
 		Auth::login($ownerId);
 
-		return ['ok' => true];
+		return ['ok' => true, 'url' => Path::personalUrl($slugCanonical)];
 	}
 
 	/** Привязать почту к дневнику, заведённому до появления идентичности. */
@@ -212,6 +245,12 @@ class PinService
 		return Auth::boundOwnerId() === null && self::hasAnyEmail();
 	}
 
+	/**
+	 * Одно поле на общей странице принимает и почту, и адрес: у дневников,
+	 * заведённых без почты, адрес — единственное имя, и заставлять человека
+	 * вспоминать URL целиком было бы издевательством. Собака в строке
+	 * отличает одно от другого.
+	 */
 	private static function resolveAccount(string $email, string $pin): ?array
 	{
 		$bound = Auth::boundOwnerId();
@@ -224,10 +263,17 @@ class PinService
 			}
 		}
 
-		$email = self::normalizeEmail($email);
-		if ($email !== '')
+		$input = trim($email);
+		if ($input !== '')
 		{
-			return self::findByEmail($email);
+			if (!str_contains($input, '@'))
+			{
+				$owner = SlugService::ownerBySlug($input);
+
+				return $owner === null ? null : self::findByOwner($owner);
+			}
+
+			return self::findByEmail(self::normalizeEmail($input));
 		}
 
 		// Переходный период: дневники, заведённые до появления почты, ищутся
@@ -237,7 +283,7 @@ class PinService
 
 	private static function wrongCredentialsMessage(string $email): string
 	{
-		return self::normalizeEmail($email) !== '' ? 'Неверная почта или пин' : 'Неверный пин';
+		return trim($email) !== '' ? 'Неверный адрес, почта или пин' : 'Неверный пин';
 	}
 
 	private static function findOne(array $filter): ?array

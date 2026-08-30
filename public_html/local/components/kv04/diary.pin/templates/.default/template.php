@@ -10,10 +10,23 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		? 'С возвращением — введите пин'
 		: 'Четыре цифры — ключ только для вас'?></p>
 
+	<div class="kv04-pin__slug" data-slug-box hidden>
+		<label for="kv04-pin-slug">Адрес дневника</label>
+		<div class="kv04-pin__slug-row">
+			<span class="kv04-pin__origin"><?=htmlspecialcharsbx((string)($_SERVER['HTTP_HOST'] ?? ''))?><?=htmlspecialcharsbx((string)($arResult['DIARY_URL'] ?? '/'))?></span>
+			<input type="text" id="kv04-pin-slug" class="kv04-input" autocomplete="off"
+				spellcheck="false" autocapitalize="off" data-slug placeholder="vadim">
+		</div>
+		<p class="kv04-pin__slug-note">Это имя дневника и его дверь: по нему вы входите и ставите
+			приложение на телефон. Менять можно в любое время.</p>
+	</div>
+
 	<div class="kv04-pin__email" data-email-box<?=$arResult['NEEDS_EMAIL'] ? '' : ' hidden'?>>
-		<label for="kv04-pin-email">Почта</label>
-		<input type="email" id="kv04-pin-email" class="kv04-input" autocomplete="email"
-			inputmode="email" spellcheck="false" data-email placeholder="you@example.com">
+		<label for="kv04-pin-email" data-email-label>Почта или адрес</label>
+		<input type="text" id="kv04-pin-email" class="kv04-input" autocomplete="username"
+			spellcheck="false" autocapitalize="off" data-email placeholder="vadim или you@example.com">
+		<p class="kv04-pin__slug-note" data-email-note hidden>Необязательно: только чтобы вернуть доступ,
+			если забудете адрес или пин.</p>
 	</div>
 
 	<div class="kv04-pin__dots" data-dots>
@@ -69,6 +82,10 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	var error = root.querySelector('[data-error]');
 	var emailBox = root.querySelector('[data-email-box]');
 	var emailInput = root.querySelector('[data-email]');
+	var emailLabel = root.querySelector('[data-email-label]');
+	var emailNote = root.querySelector('[data-email-note]');
+	var slugBox = root.querySelector('[data-slug-box]');
+	var slugInput = root.querySelector('[data-slug]');
 	var forgetBtn = root.querySelector('[data-forget]');
 	var needsEmail = root.getAttribute('data-needs-email') === '1';
 	var creating = false;
@@ -153,6 +170,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	function emailFilled() {
 		return !emailInput || emailInput.value.trim() !== '';
 	}
+	function slugFilled() {
+		return !slugInput || slugInput.value.trim() !== '';
+	}
 
 	/**
 	 * Кнопки «Войти» нет: набранный пин и есть действие. Вызывается после
@@ -176,9 +196,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 				confirmInput.focus();
 				return;
 			}
-			if (!emailFilled()) {
-				setError('Укажите почту');
-				if (emailInput) emailInput.focus();
+			if (!slugFilled()) {
+				setError('Придумайте адрес дневника');
+				if (slugInput) slugInput.focus();
 				return;
 			}
 			send('create');
@@ -186,7 +206,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		}
 
 		if (needsEmail && !emailFilled()) {
-			setError('Сначала укажите почту');
+			setError('Сначала укажите адрес или почту');
 			if (emailInput) emailInput.focus();
 			return;
 		}
@@ -226,10 +246,16 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		}
 		if (action === 'create') {
 			body.append('pin_confirm', confirmInput.value);
+			body.append('slug', slugInput ? slugInput.value : '');
 		}
 		fetch(location.href, { method: 'POST', body: body, credentials: 'same-origin' })
 			.then(function (r) { return r.json(); })
 			.then(function (data) {
+				// Дневник заведён — уходим на его собственный адрес.
+				if (data.ok && data.url) {
+					location.href = data.url;
+					return;
+				}
 				if (data.ok && data.reload) {
 					location.reload();
 					return;
@@ -281,10 +307,15 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	root.querySelector('[data-create]').addEventListener('click', function () {
 		if (!creating) {
 			creating = true;
+			// Регистрация просит адрес; почта рядом и необязательна.
+			if (slugBox) slugBox.hidden = false;
 			if (emailBox) emailBox.hidden = false;
+			if (emailLabel) emailLabel.textContent = 'Почта для восстановления';
+			if (emailInput) emailInput.placeholder = 'you@example.com (не обязательно)';
+			if (emailNote) emailNote.hidden = false;
 			confirmBox.hidden = false;
-			setError('Укажите почту, придумайте пин и повторите его');
-			if (emailInput) emailInput.focus();
+			setError('Придумайте адрес и пин, пин повторите');
+			if (slugInput) slugInput.focus();
 			return;
 		}
 		send('create');
