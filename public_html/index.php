@@ -22,7 +22,12 @@ if (is_file($kv04DiaryLoad))
 $kv04DiaryBase = $kv04DiaryLoaded ? Path::base() : '';
 if ($kv04DiaryBase !== '' && (string)($_GET['d'] ?? '') === '')
 {
-	LocalRedirect($kv04DiaryBase . '/', false, '301 Moved Permanently');
+	// Location относительный: LocalRedirect склеил бы абсолютный адрес по
+	// схеме Apache, а он за nginx всегда видит http — вышел бы лишний
+	// прыжок через незашифрованный адрес (ловушка площадки, спека 0002).
+	CHTTP::SetStatus('301 Moved Permanently');
+	header('Location: ' . $kv04DiaryBase . '/');
+	die();
 }
 
 require $_SERVER['DOCUMENT_ROOT'] . '/local/modules/kv04.diary/pub/index.php';
