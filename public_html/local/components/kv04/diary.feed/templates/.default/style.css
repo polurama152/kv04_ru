@@ -1403,24 +1403,7 @@ body.kv04-lightbox-open {
 	font-size: 0.78rem;
 }
 
-/* Служебный низ панели: «Настройки» (по праву на них) и «Админка»
-   (только Bitrix-админу). Первая из присутствующих прижимается книзу. */
-.kv04-books__settings {
-	margin-top: auto;
-	padding: 0.5rem 0 0;
-	border: 0;
-	background: none;
-	color: var(--kv04-text-muted);
-	font: inherit;
-	font-size: 0.78rem;
-	text-align: left;
-	cursor: pointer;
-}
-
-.kv04-books__settings:hover {
-	color: var(--kv04-accent);
-}
-
+/* Тихий ход в админку: рендерится только Bitrix-админу. */
 .kv04-books__admin {
 	margin-top: auto;
 	padding-top: 0.5rem;
@@ -1429,13 +1412,14 @@ body.kv04-lightbox-open {
 	text-decoration: none;
 }
 
-.kv04-books__settings + .kv04-books__admin {
-	margin-top: 0;
-	padding-top: 0.25rem;
-}
-
 .kv04-books__admin:hover {
 	color: var(--kv04-accent);
+}
+
+/* Шестерёнка настроек — правый верхний угол шапки ленты. */
+.kv04-feed__settings {
+	font-size: 1rem;
+	line-height: 1;
 }
 
 /* Панель настроек — сестра share-панели, тот же язык форм. */

@@ -38,9 +38,6 @@ foreach ($kv04Books as $kv04Book)
 	</div>
 	<button type="button" class="kv04-books__add" data-book-add>+ Новый дневник</button>
 	<p class="kv04-books__limit" data-books-limit hidden></p>
-	<?php if (!empty($arResult['SHOW_SETTINGS'])): ?>
-		<button type="button" class="kv04-books__settings" data-settings-open>Настройки</button>
-	<?php endif; ?>
 	<?php if (!empty($arResult['SHOW_ADMIN_LINK'])): ?>
 		<a class="kv04-books__admin" href="/bitrix/admin/">Админка</a>
 	<?php endif; ?>
@@ -58,6 +55,10 @@ foreach ($kv04Books as $kv04Book)
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-share-open>Поделиться</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-trash-open>Корзина</button>
 		<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-logout>Выйти</button>
+		<?php if (!empty($arResult['SHOW_SETTINGS'])): ?>
+			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm kv04-feed__settings"
+				data-settings-open aria-label="Настройки" title="Настройки">&#9881;</button>
+		<?php endif; ?>
 	</div>
 
 	<div class="kv04-share" data-share hidden>
