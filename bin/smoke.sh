@@ -29,13 +29,12 @@ trap 'rm -f "$body"' EXIT
 
 if [ -n "$DIARY_PATH" ]; then
 	DIARY_URL="$SITE/$DIARY_PATH"
-	# 1а. Корень отдал дневник магазину и отвечает вечным редиректом.
-	code=$(curl -sS -o /dev/null -w '%{http_code}' "$SITE/")
-	loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$SITE/")
-	if [ "$code" = 301 ] && [ "$loc" = "$DIARY_URL/" ]; then
-		ok "корень -> 301 на /$DIARY_PATH/"
+	# 1а. Корень вернулся магазину: прежняя главная, без следов дневника.
+	code=$(curl -sS -o "$body" -w '%{http_code}' "$SITE/")
+	if [ "$code" = 200 ] && grep -q 'Тренды сезона' "$body" && ! grep -q 'Мой дневник' "$body"; then
+		ok "корень — магазинная главная"
 	else
-		bad "корень: код $code, Location $loc (ждали 301 на $DIARY_URL/)"
+		bad "корень: код $code, магазинная главная не узнана (или в ней дневник)"
 	fi
 else
 	DIARY_URL="$SITE"

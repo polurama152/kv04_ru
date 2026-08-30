@@ -47,15 +47,16 @@ class Path
 
 	/**
 	 * Канон ввода: слэши по краям и пробелы долой, нижний регистр.
-	 * null — путь не годится: символы вне [a-z0-9_-] с '/', или первый
-	 * сегмент из зарезервированных.
+	 * null — путь не годится: пусто (главная принадлежит сайту, дневнику
+	 * нужен свой путь), символы вне [a-z0-9_-] с '/', или первый сегмент
+	 * из зарезервированных.
 	 */
 	public static function normalize(string $input): ?string
 	{
 		$path = strtolower(trim($input, " \t\n\r/"));
 		if ($path === '')
 		{
-			return '';
+			return null;
 		}
 		if (!preg_match('#^[a-z0-9_-]+(?:/[a-z0-9_-]+)*$#', $path))
 		{
@@ -108,11 +109,14 @@ class Path
 		UrlRewriter::delete($siteId, ['ID' => self::RULE_ID]);
 
 		$quoted = preg_quote(self::base(), '#');
-		$rules = [];
+		$rules = [
+			// Страница по ссылке — глобальная при любом пути: розданные
+			// /d/<токен> живут вечно. Правило здесь, а не в .htaccess, чтобы
+			// корневой index.php оставался чистой страницей сайта.
+			['CONDITION' => '#^/d/([0-9a-f]{32})/?(\?.*)?$#', 'RULE' => 'd=$1', 'PATH' => '/local/modules/kv04.diary/pub/index.php'],
+		];
 		if (self::base() !== '')
 		{
-			// На корне дневник рисует физический index.php — правило страницы
-			// не нужно.
 			$rules[] = ['CONDITION' => '#^' . $quoted . '/?(\?.*)?$#', 'PATH' => '/local/modules/kv04.diary/pub/index.php'];
 		}
 		$rules[] = ['CONDITION' => '#^' . $quoted . '/sw\.js(\?.*)?$#', 'PATH' => '/local/modules/kv04.diary/pub/sw.php'];

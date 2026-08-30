@@ -230,7 +230,7 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		$path = Path::save((string)$this->request->getPost('path'));
 		if ($path === null)
 		{
-			return ['ok' => false, 'error' => 'Такой путь не годится: латиница, цифры, дефис и подчёркивание; bitrix, local, upload и d заняты'];
+			return ['ok' => false, 'error' => 'Путь обязателен: латиница, цифры, дефис и подчёркивание; bitrix, local, upload и d заняты'];
 		}
 
 		$result = ['ok' => true, 'path' => $path, 'url' => Path::url()];

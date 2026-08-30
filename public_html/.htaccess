@@ -35,10 +35,8 @@ ErrorDocument 404 /404.php
 	# восстановлением из архива 27.06.2026: bitrixsetup.php — это чужой путь
 	# записи на сервер, test-скрипты печатают имя БД. Вернутся — мёртвыми.
 	RewriteRule ^(bitrixsetup|test|check_tables|check_encoding|bitrix_test|enum_test)\.php$ - [F]
-	# Дневник, открытый по ссылке: /d/<токен> — та же главная, только с
-	# токеном. Ровно 32 знака шестнадцатеричных: короче или длиннее — не наш
-	# адрес, и пусть отвечает обычной 404-й.
-	RewriteRule ^d/([0-9a-f]{32})$ /index.php?d=$1 [L,QSA]
+	# Дневник, открытый по ссылке (/d/<токен>), уехал из .htaccess: его ведёт
+	# правило модуля в urlrewrite.php — главная снова принадлежит магазину.
 	RewriteCond %{REQUEST_FILENAME} !-f
 	RewriteCond %{REQUEST_FILENAME} !-l
 	RewriteCond %{REQUEST_FILENAME} !-d

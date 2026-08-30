@@ -89,8 +89,8 @@ foreach ($kv04Books as $kv04Book)
 				spellcheck="false" autocomplete="off" autocapitalize="off">
 			<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-settings-save>Сохранить</button>
 		</div>
-		<p class="kv04-settings__note">Пусто — дневник на главной странице. Например, day — дневник переезжает
-			на /day, а главная отвечает редиректом. Папку создавать не нужно: адрес виртуальный.</p>
+		<p class="kv04-settings__note">Путь обязателен: главная принадлежит сайту. Например, day — дневник
+			живёт на /day. Папку создавать не нужно: адрес виртуальный.</p>
 		<p class="kv04-settings__status" data-settings-status hidden></p>
 	</div>
 <?php endif; ?>
