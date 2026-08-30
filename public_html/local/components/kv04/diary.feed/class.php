@@ -8,6 +8,7 @@ use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
 use Kv04\Diary\BookService;
 use Kv04\Diary\NoteService;
+use Kv04\Diary\Path;
 use Kv04\Diary\PinService;
 use Kv04\Diary\ShareService;
 
@@ -46,6 +47,11 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		// залогиненный админ сайта, ему показывается тихий ход в админку.
 		global $USER;
 		$this->arResult['SHOW_ADMIN_LINK'] = is_object($USER) && $USER->IsAdmin();
+		// Панель настроек: Bitrix-админу всегда, владельцу пина — по флагу
+		// owner_settings. Сам флаг меняется только в админке, иначе владелец
+		// выдал бы права сам себе.
+		$this->arResult['SHOW_SETTINGS'] = $this->arResult['SHOW_ADMIN_LINK'] || Path::ownerSettingsAllowed();
+		$this->arResult['DIARY_PATH'] = Path::raw();
 		// Планировщика у модуля нет, агенты Bitrix на этом хостинге не крутятся,
 		// поэтому просроченное чистим изредка на показе ленты — и всегда при
 		// открытии корзины.
@@ -145,6 +151,12 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 			return;
 		}
 
+		if ($action === 'settings_save')
+		{
+			$this->json($this->saveSettings());
+			return;
+		}
+
 		if ($action === 'add')
 		{
 			$files = $this->normalizeFiles($_FILES['media'] ?? []);
@@ -199,6 +211,36 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		}
 
 		$this->json(['ok' => false, 'error' => 'Неизвестное действие']);
+	}
+
+	/**
+	 * Путь дневника из панели настроек. Пин-сессия уже проверена в
+	 * executeComponent, здесь — само право на настройки: та же формула,
+	 * что открывает панель в шаблоне.
+	 */
+	private function saveSettings(): array
+	{
+		global $USER;
+		$isAdmin = is_object($USER) && $USER->IsAdmin();
+		if (!$isAdmin && !Path::ownerSettingsAllowed())
+		{
+			return ['ok' => false, 'error' => 'Настройки доступны только администратору'];
+		}
+
+		$path = Path::save((string)$this->request->getPost('path'));
+		if ($path === null)
+		{
+			return ['ok' => false, 'error' => 'Такой путь не годится: латиница, цифры, дефис и подчёркивание; bitrix, local, upload и d заняты'];
+		}
+
+		$result = ['ok' => true, 'path' => $path, 'url' => Path::url()];
+		if (Path::collides($path))
+		{
+			$result['warning'] = 'На сайте уже есть файл или папка «' . explode('/', $path, 2)[0]
+				. '» — она перехватит адрес раньше дневника. Лучше выбрать другой путь.';
+		}
+
+		return $result;
 	}
 
 	private function normalizeFiles(array $files): array

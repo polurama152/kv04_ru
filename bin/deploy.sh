@@ -16,7 +16,7 @@ SITE=https://kv04.ru
 
 cd "$(dirname "$0")/.." || exit 2
 
-CUSTOM=(public_html/local public_html/index.php public_html/.htaccess public_html/sw.js)
+CUSTOM=(public_html/local public_html/index.php public_html/.htaccess)
 
 CHECK_ONLY=0
 [ "${1-}" = "--check" ] && CHECK_ONLY=1

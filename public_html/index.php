@@ -1,9 +1,12 @@
 <?php
 
-use Kv04\Diary\Auth;
-use Kv04\Diary\Installer;
-use Kv04\Diary\ShareService;
+use Kv04\Diary\Path;
 
+/**
+ * Корень сайта. Дневник живёт на пути из настройки модуля (Path): пока путь
+ * пуст — рисуется прямо здесь, после переезда корень отвечает вечным
+ * редиректом, а страницу дневника собирает bitrix/urlrewrite.php.
+ */
 require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php';
 
 $kv04DiaryLoaded = false;
@@ -14,131 +17,12 @@ if (is_file($kv04DiaryLoad))
 	$kv04DiaryLoaded = kv04DiaryLoadModule();
 }
 
-/**
- * Дневник, открытый по ссылке. Разбираем до первой строчки разметки: от
- * ответа зависит и заголовок страницы, и код ответа. Несуществующая и
- * отозванная ссылка отвечают одинаково — 404 и короткая страница, чтобы по
- * ответу нельзя было понять, была ли когда-нибудь такая ссылка.
- */
-$kv04DiaryToken = (string)($_GET['d'] ?? '');
-$kv04DiaryShare = null;
-if ($kv04DiaryToken !== '' && $kv04DiaryLoaded)
+// Страница по ссылке (?d=) отвечает с корня при любом пути дневника:
+// правило /d/ в .htaccess глобальное, розданные ссылки не ломаются.
+$kv04DiaryBase = $kv04DiaryLoaded ? Path::base() : '';
+if ($kv04DiaryBase !== '' && (string)($_GET['d'] ?? '') === '')
 {
-	Installer::ensure();
-	$kv04DiaryShare = ShareService::resolve($kv04DiaryToken);
-	if (!$kv04DiaryShare)
-	{
-		CHTTP::SetStatus('404 Not Found');
-	}
+	LocalRedirect($kv04DiaryBase . '/', false, '301 Moved Permanently');
 }
 
-$APPLICATION->SetTitle($kv04DiaryShare ? $kv04DiaryShare['title'] : 'Мой дневник');
-
-/**
- * Статика отдаётся с Cache-Control на трое суток (mod_expires в .htaccess),
- * поэтому без метки версии правка стилей доходит до вернувшегося посетителя
- * только через трое суток. Подставляем mtime файла: кэш остаётся длинным,
- * но новый файл получает новый URL.
- */
-$kv04DiaryAsset = static function (string $path): string {
-	$file = $_SERVER['DOCUMENT_ROOT'] . $path;
-	$version = is_file($file) ? (int)filemtime($file) : 0;
-
-	return $version > 0 ? $path . '?v=' . $version : $path;
-};
-
-$kv04DiaryThemeCss = '/local/modules/kv04.diary/assets/diary-theme.css';
-$kv04DiaryHljsCss = '/local/modules/kv04.diary/assets/highlight/atom-one-dark.min.css';
-$kv04DiaryComponentCss = '/local/components/kv04/diary.pin/templates/.default/style.css';
-$kv04DiaryFeed = $kv04DiaryLoaded && $kv04DiaryToken === '' && Auth::isLoggedIn();
-// Заметки на странице по ссылке — те же, значит и стили ленты те же.
-if ($kv04DiaryFeed || $kv04DiaryShare)
-{
-	$kv04DiaryComponentCss = '/local/components/kv04/diary.feed/templates/.default/style.css';
-}
-?>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-	<meta charset="<?= defined('SITE_CHARSET') ? SITE_CHARSET : 'UTF-8' ?>">
-	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-	<meta name="theme-color" content="#0e1621">
-	<meta name="color-scheme" content="dark">
-	<title><?php $APPLICATION->ShowTitle(false) ?></title>
-	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryThemeCss)) ?>">
-	<?php if ($kv04DiaryLoaded): ?>
-	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryComponentCss)) ?>">
-	<?php endif; ?>
-	<?php if ($kv04DiaryFeed || $kv04DiaryShare): ?>
-	<link rel="stylesheet" href="<?= htmlspecialcharsbx($kv04DiaryAsset($kv04DiaryHljsCss)) ?>">
-	<?php endif; ?>
-	<?php if ($kv04DiaryToken !== ''): ?>
-	<?php /* Личный дневник не должен попасть в поиск, даже если ссылкой
-	   поделились в открытом чате и её подобрал робот. */ ?>
-	<meta name="robots" content="noindex, nofollow">
-	<?php else: ?>
-	<?php /* PWA — только своя страница: гостю по share-ссылке установка ни к чему. */ ?>
-	<link rel="manifest" href="<?= htmlspecialcharsbx($kv04DiaryAsset('/local/modules/kv04.diary/assets/pwa/manifest.webmanifest')) ?>">
-	<link rel="apple-touch-icon" href="/local/modules/kv04.diary/assets/pwa/apple-touch-icon.png">
-	<meta name="application-name" content="Дневник">
-	<meta name="apple-mobile-web-app-title" content="Дневник">
-	<?php endif; ?>
-</head>
-<body class="kv04-diary-body">
-<div class="kv04-diary">
-<div class="kv04-diary__inner">
-<?php
-if (!$kv04DiaryLoaded)
-{
-	?>
-	<div class="kv04-diary__error">Модуль дневника не найден. Загрузите каталог local/modules/kv04.diary/ на сервер.</div>
-	<?php
-}
-else
-{
-	Installer::ensure();
-
-	if ($kv04DiaryToken !== '')
-	{
-		if ($kv04DiaryShare)
-		{
-			$APPLICATION->IncludeComponent('kv04:diary.share', '.default', [
-				'OWNER' => $kv04DiaryShare['owner'],
-				'BOOK' => $kv04DiaryShare['book'],
-				'TITLE' => $kv04DiaryShare['title'],
-				'CACHE_TYPE' => 'N',
-			], false);
-		}
-		else
-		{
-			?>
-			<div class="kv04-diary__error">Такой ссылки нет. Возможно, доступ закрыли.</div>
-			<?php
-		}
-	}
-	elseif (!Auth::isLoggedIn())
-	{
-		$APPLICATION->IncludeComponent('kv04:diary.pin', '.default', [], false);
-	}
-	else
-	{
-		$APPLICATION->IncludeComponent('kv04:diary.feed', '.default', [
-			'CACHE_TYPE' => 'N',
-		], false);
-	}
-}
-?>
-</div>
-</div>
-<?php if ($kv04DiaryToken === ''): ?>
-<script>
-	if ('serviceWorker' in navigator) {
-		navigator.serviceWorker.register('/sw.js');
-	}
-</script>
-<?php endif; ?>
-</body>
-</html>
-<?php
-// epilog_after не подключаем: на сервере дублируется класс main (main.broken.*),
-// а для дневника достаточно prolog_before — sessid, сессия и компоненты работают.
+require $_SERVER['DOCUMENT_ROOT'] . '/local/modules/kv04.diary/pub/index.php';

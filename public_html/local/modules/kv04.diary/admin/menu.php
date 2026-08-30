@@ -58,5 +58,10 @@ return [
 			'url' => 'highloadblock_rows_list.php?ENTITY_ID=' . $kv04DiaryHlId . '&lang=' . LANGUAGE_ID,
 			'more_url' => ['highloadblock_row_edit.php?ENTITY_ID=' . $kv04DiaryHlId],
 		],
+		[
+			'text' => GetMessage('KV04_DIARY_MENU_SETTINGS'),
+			'title' => GetMessage('KV04_DIARY_MENU_SETTINGS_TITLE'),
+			'url' => 'settings.php?mid=kv04.diary&lang=' . LANGUAGE_ID,
+		],
 	],
 ];

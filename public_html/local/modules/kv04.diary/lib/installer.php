@@ -27,8 +27,9 @@ class Installer
 	 * 4: свойство DELETED_AT под корзину. 5: таблица обрывков заметок.
 	 * 6: таблица дневников и свойство BOOK у заметок.
 	 * 7: таблица ссылок, которыми делятся дневником.
+	 * 8: опция пути дневника и rewrite-правила под неё.
 	 */
-	private const SCHEMA_VERSION = '7';
+	private const SCHEMA_VERSION = '8';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -71,6 +72,14 @@ class Installer
 		self::ensureTrashTable();
 		self::ensureBooksTable();
 		self::ensureSharesTable();
+		// Опция пути: живой сайт без неё продолжает жить на корне ('').
+		// Правила перекладываются здесь же, чтобы клиенту Маркетплейса
+		// хватило установки модуля без ручных шагов.
+		if ((string)Option::get(self::MODULE_ID, Path::OPTION, "\0") === "\0")
+		{
+			Option::set(self::MODULE_ID, Path::OPTION, '');
+		}
+		Path::applyRewrite();
 
 		self::setOption('hlblock_id', (string)$hlId);
 		self::setOption('iblock_id', (string)$iblockId);

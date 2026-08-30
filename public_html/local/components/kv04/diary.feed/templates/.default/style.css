@@ -1403,7 +1403,24 @@ body.kv04-lightbox-open {
 	font-size: 0.78rem;
 }
 
-/* Тихий ход в админку: рендерится только Bitrix-админу. */
+/* Служебный низ панели: «Настройки» (по праву на них) и «Админка»
+   (только Bitrix-админу). Первая из присутствующих прижимается книзу. */
+.kv04-books__settings {
+	margin-top: auto;
+	padding: 0.5rem 0 0;
+	border: 0;
+	background: none;
+	color: var(--kv04-text-muted);
+	font: inherit;
+	font-size: 0.78rem;
+	text-align: left;
+	cursor: pointer;
+}
+
+.kv04-books__settings:hover {
+	color: var(--kv04-accent);
+}
+
 .kv04-books__admin {
 	margin-top: auto;
 	padding-top: 0.5rem;
@@ -1412,8 +1429,80 @@ body.kv04-lightbox-open {
 	text-decoration: none;
 }
 
+.kv04-books__settings + .kv04-books__admin {
+	margin-top: 0;
+	padding-top: 0.25rem;
+}
+
 .kv04-books__admin:hover {
 	color: var(--kv04-accent);
+}
+
+/* Панель настроек — сестра share-панели, тот же язык форм. */
+.kv04-settings {
+	margin-bottom: 1rem;
+	padding: 0.9rem 1rem;
+	border: 1px solid var(--kv04-border);
+	border-radius: var(--kv04-radius);
+	background: var(--kv04-card);
+}
+
+.kv04-settings__head {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: baseline;
+	margin-bottom: 0.5rem;
+}
+
+.kv04-settings__title {
+	font-weight: 600;
+}
+
+.kv04-settings__head .kv04-btn {
+	margin-left: auto;
+}
+
+.kv04-settings__label {
+	display: block;
+	margin-bottom: 0.35rem;
+	font-size: 0.82rem;
+	color: var(--kv04-text-muted);
+}
+
+.kv04-settings__row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin-bottom: 0.75rem;
+}
+
+.kv04-settings__origin {
+	color: var(--kv04-text-muted);
+	font-size: 0.85rem;
+}
+
+.kv04-settings__path {
+	flex: 1 1 8rem;
+	min-width: 6rem;
+	font-size: 0.85rem;
+}
+
+.kv04-settings__note {
+	margin: 0;
+	font-size: 0.82rem;
+	color: var(--kv04-text-muted);
+}
+
+.kv04-settings__status {
+	margin: 0.5rem 0 0;
+	font-size: 0.82rem;
+	color: var(--kv04-text-muted);
+}
+
+.kv04-settings__status.is-error {
+	color: var(--kv04-danger, #e05d5d);
 }
 
 .kv04-books__backdrop {

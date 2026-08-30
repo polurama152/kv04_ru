@@ -38,6 +38,9 @@ foreach ($kv04Books as $kv04Book)
 	</div>
 	<button type="button" class="kv04-books__add" data-book-add>+ Новый дневник</button>
 	<p class="kv04-books__limit" data-books-limit hidden></p>
+	<?php if (!empty($arResult['SHOW_SETTINGS'])): ?>
+		<button type="button" class="kv04-books__settings" data-settings-open>Настройки</button>
+	<?php endif; ?>
 	<?php if (!empty($arResult['SHOW_ADMIN_LINK'])): ?>
 		<a class="kv04-books__admin" href="/bitrix/admin/">Админка</a>
 	<?php endif; ?>
@@ -70,6 +73,26 @@ foreach ($kv04Books as $kv04Book)
 			<button type="button" class="kv04-btn kv04-btn--danger kv04-btn--sm" data-share-revoke>Закрыть доступ</button>
 		</div>
 	</div>
+
+<?php if (!empty($arResult['SHOW_SETTINGS'])): ?>
+	<div class="kv04-settings" data-settings hidden>
+		<div class="kv04-settings__head">
+			<span class="kv04-settings__title">Настройки</span>
+			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-settings-close>Закрыть</button>
+		</div>
+		<label class="kv04-settings__label" for="kv04-settings-path">Путь дневника</label>
+		<div class="kv04-settings__row">
+			<span class="kv04-settings__origin"><?=htmlspecialcharsbx((string)($_SERVER['HTTP_HOST'] ?? ''))?>/</span>
+			<input type="text" id="kv04-settings-path" class="kv04-input kv04-settings__path" data-settings-path
+				value="<?=htmlspecialcharsbx((string)($arResult['DIARY_PATH'] ?? ''))?>" placeholder="day"
+				spellcheck="false" autocomplete="off" autocapitalize="off">
+			<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-settings-save>Сохранить</button>
+		</div>
+		<p class="kv04-settings__note">Пусто — дневник на главной странице. Например, day — дневник переезжает
+			на /day, а главная отвечает редиректом. Папку создавать не нужно: адрес виртуальный.</p>
+		<p class="kv04-settings__status" data-settings-status hidden></p>
+	</div>
+<?php endif; ?>
 
 	<div class="kv04-trash" data-trash hidden>
 		<div class="kv04-trash__head">

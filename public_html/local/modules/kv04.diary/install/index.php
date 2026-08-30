@@ -1,5 +1,6 @@
 <?php
 
+use Bitrix\Main\Config\Option;
 use Bitrix\Main\ModuleManager;
 use Kv04\Diary\Installer;
 
@@ -22,6 +23,10 @@ class kv04_diary extends CModule
 	public function DoInstall()
 	{
 		ModuleManager::registerModule($this->MODULE_ID);
+		// Свежая установка узнаётся по пустым опциям: у живого сайта уже
+		// есть hlblock_id. Дефолт 'diary' не даёт коробке Маркетплейса
+		// захватить главную страницу клиента.
+		$fresh = (string)Option::get($this->MODULE_ID, 'hlblock_id', '') === '';
 		$load = $_SERVER['DOCUMENT_ROOT'] . '/local/modules/kv04.diary/load.php';
 		if (is_file($load))
 		{
@@ -31,6 +36,10 @@ class kv04_diary extends CModule
 		else
 		{
 			require_once dirname(__DIR__) . '/include.php';
+		}
+		if ($fresh && (string)Option::get($this->MODULE_ID, 'path', '') === '')
+		{
+			Option::set($this->MODULE_ID, 'path', 'diary');
 		}
 		Installer::ensure();
 	}

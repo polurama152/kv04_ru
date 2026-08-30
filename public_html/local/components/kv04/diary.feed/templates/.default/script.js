@@ -1314,6 +1314,53 @@
 		});
 	}
 
+	// --- Настройки ---------------------------------------------------------
+	//
+	// Панель есть только у того, кому положено: Bitrix-админ или владелец
+	// при включённом owner_settings — сервер решает то же в settings_save.
+	var settingsBox = root.querySelector('[data-settings]');
+	var settingsOpenBtn = document.querySelector('[data-settings-open]');
+	if (settingsBox && settingsOpenBtn) {
+		var settingsPathInput = settingsBox.querySelector('[data-settings-path]');
+		var settingsStatus = settingsBox.querySelector('[data-settings-status]');
+
+		var setSettingsStatus = function (msg, isError) {
+			settingsStatus.hidden = !msg;
+			settingsStatus.textContent = msg || '';
+			settingsStatus.classList.toggle('is-error', !!isError);
+		};
+
+		var saveSettings = function () {
+			setSettingsStatus('Сохраняю…', false);
+			post({ action: 'settings_save', path: settingsPathInput.value })
+				.then(function (data) {
+					if (!data.ok) { setSettingsStatus(data.error || 'Ошибка', true); return; }
+					if (data.warning) { setSettingsStatus(data.warning, true); return; }
+					// Адрес дневника сменился — переходим на новый; старый
+					// адрес дальше отвечает редиректом, ничего не теряется.
+					if (data.url && data.url !== location.pathname) { location.href = data.url; return; }
+					setSettingsStatus('Сохранено', false);
+				})
+				.catch(function () { setSettingsStatus('Нет связи', true); });
+		};
+
+		settingsOpenBtn.addEventListener('click', function () {
+			closeBooks();
+			settingsBox.hidden = false;
+			setSettingsStatus('', false);
+			settingsPathInput.focus();
+		});
+
+		settingsBox.addEventListener('click', function (e) {
+			if (e.target.closest('[data-settings-close]')) { settingsBox.hidden = true; return; }
+			if (e.target.closest('[data-settings-save]')) { saveSettings(); }
+		});
+
+		settingsPathInput.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter') { e.preventDefault(); saveSettings(); }
+		});
+	}
+
 	bindEditor(input, {
 		onSave: submitComposer,
 		onImages: function (files) { setPendingFiles(files, true); }

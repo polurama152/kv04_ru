@@ -8,3 +8,5 @@ $MESS['KV04_DIARY_MENU_NOTES'] = 'Заметки';
 $MESS['KV04_DIARY_MENU_NOTES_TITLE'] = 'Элементы инфоблока дневника';
 $MESS['KV04_DIARY_MENU_KEYS'] = 'Владельцы и пины';
 $MESS['KV04_DIARY_MENU_KEYS_TITLE'] = 'Ключи доступа владельцев (Highload-блок)';
+$MESS['KV04_DIARY_MENU_SETTINGS'] = 'Настройка';
+$MESS['KV04_DIARY_MENU_SETTINGS_TITLE'] = 'Путь дневника и права на настройки';

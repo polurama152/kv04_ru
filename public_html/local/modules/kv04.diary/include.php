@@ -24,6 +24,7 @@ require_once $libDir . 'auth.php';
 require_once $libDir . 'pinservice.php';
 require_once $libDir . 'noteservice.php';
 require_once $libDir . 'html.php';
+require_once $libDir . 'path.php';
 
 if (class_exists(Loader::class))
 {
@@ -39,5 +40,6 @@ if (class_exists(Loader::class))
 		'Kv04\\Diary\\PinService' => '/local/modules/kv04.diary/lib/pinservice.php',
 		'Kv04\\Diary\\NoteService' => '/local/modules/kv04.diary/lib/noteservice.php',
 		'Kv04\\Diary\\Html' => '/local/modules/kv04.diary/lib/html.php',
+		'Kv04\\Diary\\Path' => '/local/modules/kv04.diary/lib/path.php',
 	]);
 }
