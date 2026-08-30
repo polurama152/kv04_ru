@@ -62,9 +62,11 @@ done <<< "$diverged"
 
 left=$(drift)
 if [ "$fail" = 0 ] && [ -z "$left" ]; then
+	# Корень отвечает 200 (дневник на корне) или 301 (дневник переехал на
+	# свой путь, см. спеку 0004) — живы оба варианта.
 	code=$(curl -sS -o /dev/null -w '%{http_code}' "$SITE/")
 	echo "Готово, прод совпадает. $SITE/ -> $code"
-	[ "$code" = 200 ] || exit 1
+	case "$code" in 200|301) ;; *) exit 1;; esac
 else
 	echo "Остались расхождения:"
 	echo "$left" | sed 's/^/  /'
