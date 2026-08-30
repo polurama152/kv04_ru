@@ -19,7 +19,10 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	<div class="kv04-pin__dots" data-dots>
 		<span></span><span></span><span></span><span></span>
 	</div>
-	<input type="password" inputmode="numeric" maxlength="4"
+	<?php /* inputmode="none": цифры на телефоне набирают экранным падом, и
+	   выезжающая клавиатура только закрывала бы его. Физической клавиатуре
+	   на десктопе inputmode не мешает — фокус и autofocus остаются. */ ?>
+	<input type="password" inputmode="none" maxlength="4"
 		autocomplete="one-time-code" data-lpignore="true" data-1p-ignore data-bwignore
 		class="kv04-pin__hidden" data-pin autofocus aria-label="Пин-код">
 
@@ -40,7 +43,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 
 	<div class="kv04-pin__confirm" data-confirm hidden>
 		<label>Повторите пин</label>
-		<input type="password" inputmode="numeric" maxlength="4"
+		<input type="password" inputmode="none" maxlength="4"
 			autocomplete="one-time-code" data-lpignore="true" data-1p-ignore data-bwignore
 			class="kv04-input" data-pin-confirm>
 	</div>
@@ -101,18 +104,48 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 			maybeSubmit(false);
 		}
 	}
+	/**
+	 * Куда падать цифре с экранного пада. Клавиатура телефона заглушена
+	 * (inputmode="none"), поэтому пад обслуживает оба пин-поля: как только
+	 * при создании основной пин полон — цифры идут в подтверждение.
+	 * По фокусу решать нельзя: тап по кнопке пада сам забирает фокус.
+	 */
+	function padTargetsConfirm() {
+		return creating && !confirmBox.hidden && pinInput.value.length >= 4;
+	}
 	function appendDigit(d) {
+		if (padTargetsConfirm()) {
+			if (confirmInput.value.length < 4) {
+				confirmInput.value += d;
+				var length = confirmInput.value.length;
+				var typedOneMore = length === lastConfirmLength + 1;
+				lastConfirmLength = length;
+				if (typedOneMore) maybeSubmit(false);
+			}
+			return;
+		}
 		if (pinInput.value.length < 4) {
 			pinInput.value += d;
 			syncPin(true);
 		}
 	}
 	function clearPin() {
+		// При создании «C» — начать ввод заново целиком: полупустое
+		// подтверждение при полном пине только путало бы.
+		if (creating) {
+			confirmInput.value = '';
+			lastConfirmLength = 0;
+		}
 		pinInput.value = '';
 		lastPinLength = 0;
 		renderDots();
 	}
 	function deleteDigit() {
+		if (padTargetsConfirm() && confirmInput.value.length > 0) {
+			confirmInput.value = confirmInput.value.slice(0, -1);
+			lastConfirmLength = confirmInput.value.length;
+			return;
+		}
 		pinInput.value = pinInput.value.slice(0, -1);
 		lastPinLength = pinInput.value.length;
 		renderDots();
