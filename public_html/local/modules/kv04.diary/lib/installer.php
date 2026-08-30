@@ -28,8 +28,9 @@ class Installer
 	 * 6: таблица дневников и свойство BOOK у заметок.
 	 * 7: таблица ссылок, которыми делятся дневником.
 	 * 8: опция пути дневника и rewrite-правила под неё.
+	 * 9: таблица личных адресов владельцев.
 	 */
-	private const SCHEMA_VERSION = '8';
+	private const SCHEMA_VERSION = '9';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -72,6 +73,7 @@ class Installer
 		self::ensureTrashTable();
 		self::ensureBooksTable();
 		self::ensureSharesTable();
+		self::ensureSlugsTable();
 		// Опция пути: живой сайт без неё продолжает жить на корне ('').
 		// Правила перекладываются здесь же, чтобы клиенту Маркетплейса
 		// хватило установки модуля без ручных шагов.
@@ -197,6 +199,33 @@ class Installer
 			. 'PRIMARY KEY (ID),'
 			. 'UNIQUE INDEX UX_KV04_DIARY_SHARES_TOKEN (TOKEN),'
 			. 'INDEX IX_KV04_DIARY_SHARES_BOOK (OWNER_ID, BOOK_ID, REVOKED_AT)'
+			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
+	}
+
+	/**
+	 * Личные адреса дневников. Уникальны оба ключа: адрес — потому что по нему
+	 * идёт поиск и два одинаковых развели бы владельцев по одной двери,
+	 * владелец — потому что адрес у него один (апсерт в SlugService::save
+	 * опирается на этот индекс).
+	 */
+	private static function ensureSlugsTable(): void
+	{
+		$connection = Application::getConnection();
+		if ($connection->isTableExists(SlugService::TABLE))
+		{
+			return;
+		}
+
+		$connection->queryExecute(
+			'CREATE TABLE IF NOT EXISTS ' . SlugService::TABLE . ' ('
+			. 'ID INT NOT NULL AUTO_INCREMENT,'
+			. 'OWNER_ID VARCHAR(40) NOT NULL,'
+			. 'SLUG VARCHAR(32) NOT NULL,'
+			. 'CREATED_AT INT NOT NULL DEFAULT 0,'
+			. 'PRIMARY KEY (ID),'
+			. 'UNIQUE INDEX UX_KV04_DIARY_SLUGS_OWNER (OWNER_ID),'
+			. 'UNIQUE INDEX UX_KV04_DIARY_SLUGS_SLUG (SLUG)'
 			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
 		);
 	}

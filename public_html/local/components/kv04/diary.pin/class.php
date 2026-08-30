@@ -28,8 +28,11 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 
 		$this->arResult['SESSID'] = bitrix_sessid();
 		// На знакомом устройстве форма остаётся прежней: только пин.
-		$this->arResult['BOUND'] = Auth::boundOwnerId() !== null;
-		$this->arResult['NEEDS_EMAIL'] = PinService::needsEmail();
+		// На личном адресе — тоже: адрес уже сказал, чей это дневник.
+		// Незнакомый адрес выглядит так же, иначе по форме было бы видно,
+		// существует он или нет.
+		$this->arResult['BOUND'] = Auth::boundOwnerId() !== null || $this->slugOwner() !== null;
+		$this->arResult['NEEDS_EMAIL'] = $this->slugOwner() === null && PinService::needsEmail();
 		$this->includeComponentTemplate();
 	}
 
@@ -61,9 +64,20 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 			return;
 		}
 
-		$result = PinService::login($pin, $email);
+		$result = PinService::login($pin, $email, $this->slugOwner());
 		$result['reload'] = !empty($result['ok']);
 		$this->json($result);
+	}
+
+	/**
+	 * Владелец личного адреса: строка — известный, пустая строка — адрес есть,
+	 * но ничей, null — обычная страница без адреса.
+	 */
+	private function slugOwner(): ?string
+	{
+		$owner = $this->arParams['SLUG_OWNER'] ?? null;
+
+		return $owner === null ? null : (string)$owner;
 	}
 
 	private function loadDiaryModule(): bool

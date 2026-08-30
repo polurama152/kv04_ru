@@ -1479,6 +1479,17 @@ body.kv04-lightbox-open {
 	color: var(--kv04-text-muted);
 }
 
+.kv04-settings__label--next {
+	margin-top: 1rem;
+	padding-top: 0.85rem;
+	border-top: 1px solid var(--kv04-border);
+}
+
+.kv04-settings__row--actions {
+	margin-top: 0.85rem;
+	margin-bottom: 0;
+}
+
 .kv04-settings__status {
 	margin: 0.5rem 0 0;
 	font-size: 0.82rem;

@@ -81,16 +81,31 @@ foreach ($kv04Books as $kv04Book)
 			<span class="kv04-settings__title">Настройки</span>
 			<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-settings-close>Закрыть</button>
 		</div>
-		<label class="kv04-settings__label" for="kv04-settings-path">Путь дневника</label>
+		<label class="kv04-settings__label" for="kv04-settings-slug">Мой адрес</label>
+		<div class="kv04-settings__row">
+			<span class="kv04-settings__origin"><?=htmlspecialcharsbx((string)($_SERVER['HTTP_HOST'] ?? ''))?><?=htmlspecialcharsbx(\Kv04\Diary\Path::url())?></span>
+			<input type="text" id="kv04-settings-slug" class="kv04-input kv04-settings__path" data-settings-slug
+				value="<?=htmlspecialcharsbx((string)($arResult['DIARY_SLUG'] ?? ''))?>" placeholder="vadim"
+				spellcheck="false" autocomplete="off" autocapitalize="off">
+		</div>
+		<p class="kv04-settings__note">Свой адрес нужен, чтобы поставить дневник на телефон отдельным
+			приложением: у каждого адреса свой значок. Пусто — общий адрес на всех. Пускает всё равно пин.</p>
+
+<?php if (!empty($arResult['SHOW_PATH_SETTING'])): ?>
+		<label class="kv04-settings__label kv04-settings__label--next" for="kv04-settings-path">Путь дневника (общий)</label>
 		<div class="kv04-settings__row">
 			<span class="kv04-settings__origin"><?=htmlspecialcharsbx((string)($_SERVER['HTTP_HOST'] ?? ''))?>/</span>
 			<input type="text" id="kv04-settings-path" class="kv04-input kv04-settings__path" data-settings-path
 				value="<?=htmlspecialcharsbx((string)($arResult['DIARY_PATH'] ?? ''))?>" placeholder="day"
 				spellcheck="false" autocomplete="off" autocapitalize="off">
+		</div>
+		<p class="kv04-settings__note">Общий для всех владельцев: главная принадлежит сайту. Папку создавать
+			не нужно, адрес виртуальный.</p>
+<?php endif; ?>
+
+		<div class="kv04-settings__row kv04-settings__row--actions">
 			<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-settings-save>Сохранить</button>
 		</div>
-		<p class="kv04-settings__note">Путь обязателен: главная принадлежит сайту. Например, day — дневник
-			живёт на /day. Папку создавать не нужно: адрес виртуальный.</p>
 		<p class="kv04-settings__status" data-settings-status hidden></p>
 	</div>
 <?php endif; ?>

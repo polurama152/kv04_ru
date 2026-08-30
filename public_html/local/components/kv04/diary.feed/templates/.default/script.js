@@ -1321,6 +1321,8 @@
 	var settingsBox = root.querySelector('[data-settings]');
 	var settingsOpenBtn = document.querySelector('[data-settings-open]');
 	if (settingsBox && settingsOpenBtn) {
+		var settingsSlugInput = settingsBox.querySelector('[data-settings-slug]');
+		// Поле общего пути есть не у всех: сосед не двигает чужие приложения.
 		var settingsPathInput = settingsBox.querySelector('[data-settings-path]');
 		var settingsStatus = settingsBox.querySelector('[data-settings-status]');
 
@@ -1332,12 +1334,15 @@
 
 		var saveSettings = function () {
 			setSettingsStatus('Сохраняю…', false);
-			post({ action: 'settings_save', path: settingsPathInput.value })
+			var payload = { action: 'settings_save', slug: settingsSlugInput.value };
+			if (settingsPathInput) payload.path = settingsPathInput.value;
+			post(payload)
 				.then(function (data) {
 					if (!data.ok) { setSettingsStatus(data.error || 'Ошибка', true); return; }
 					if (data.warning) { setSettingsStatus(data.warning, true); return; }
-					// Адрес дневника сменился — переходим на новый; старый
-					// адрес дальше отвечает редиректом, ничего не теряется.
+					// Адрес дневника сменился — переходим на новый: приложение
+					// ставится именно с него. Прежний адрес отвечает редиректом,
+					// поэтому ничего не теряется.
 					if (data.url && data.url !== location.pathname) { location.href = data.url; return; }
 					setSettingsStatus('Сохранено', false);
 				})
@@ -1348,7 +1353,7 @@
 			closeBooks();
 			settingsBox.hidden = false;
 			setSettingsStatus('', false);
-			settingsPathInput.focus();
+			settingsSlugInput.focus();
 		});
 
 		settingsBox.addEventListener('click', function (e) {
@@ -1356,8 +1361,10 @@
 			if (e.target.closest('[data-settings-save]')) { saveSettings(); }
 		});
 
-		settingsPathInput.addEventListener('keydown', function (e) {
-			if (e.key === 'Enter') { e.preventDefault(); saveSettings(); }
+		settingsBox.addEventListener('keydown', function (e) {
+			if (e.key !== 'Enter' || !e.target.closest('[data-settings-slug], [data-settings-path]')) return;
+			e.preventDefault();
+			saveSettings();
 		});
 	}
 

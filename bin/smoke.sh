@@ -59,6 +59,17 @@ if [ -n "${LEGACY_PATH:-}" ]; then
 	[ "$loc" = "$DIARY_URL/" ] && ok "прежний /$LEGACY_PATH/ -> 301 на дневник" || bad "прежний /$LEGACY_PATH/: Location $loc"
 fi
 
+# 1д. Личный адрес владельца: своя страница, свой манифест, и по ответу
+# не видно, заведён такой адрес или нет (проверяем на заведомо чужом).
+loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$DIARY_URL/probeaddress")
+[ "$loc" = "$DIARY_URL/probeaddress/" ] && ok "личный адрес: 301 на канонический" || bad "личный адрес без слэша: Location $loc"
+curl -sS -o "$body" "$DIARY_URL/probeaddress/manifest.webmanifest"
+if grep -q '"start_url": *"'"${DIARY_PATH:+/$DIARY_PATH}"'/probeaddress/"' "$body"; then
+	ok "личный адрес: свой манифест (своё приложение)"
+else
+	bad "личный адрес: манифест не про него"
+fi
+
 # 2. PWA: воркер и манифест отвечают с пути дневника.
 hdr=$(curl -sS -o "$body" -D - "$DIARY_URL/sw.js")
 if echo "$hdr" | head -1 | grep -q ' 200' && echo "$hdr" | grep -qi '^cache-control: no-cache' && grep -q 'kv04-diary' "$body"; then

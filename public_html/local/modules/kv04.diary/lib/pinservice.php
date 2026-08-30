@@ -39,8 +39,15 @@ class PinService
 	 * поэтому вероятность попасть в ЧУЖОЙ дневник равнялась N/10 000: при
 	 * тысяче пользователей обычная опечатка открывала чужие записи в 10%
 	 * случаев. Теперь пин проверяется внутри одного аккаунта.
+	 *
+	 * $slugOwnerId — вход с личного адреса: сам адрес и есть «чей дневник»,
+	 * поэтому почта не нужна. Строка — известный владелец, пустая строка —
+	 * адрес незнакомый. Пустую НЕ подменяем ни привязкой устройства, ни
+	 * почтой намеренно: иначе на несуществующем адресе свой пин пускал бы
+	 * внутрь, а на чужом — нет, и по этой разнице чужие адреса можно было бы
+	 * перечислить. Незнакомый адрес обязан отвечать ровно как чужой.
 	 */
-	public static function login(string $pin, string $email = ''): array
+	public static function login(string $pin, string $email = '', ?string $slugOwnerId = null): array
 	{
 		$pin = self::normalize($pin);
 		if (!self::isValidFormat($pin))
@@ -55,7 +62,16 @@ class PinService
 			return self::lockedResult($ipState['wait']);
 		}
 
-		$row = self::resolveAccount($email, $pin);
+		if ($slugOwnerId === null)
+		{
+			$row = self::resolveAccount($email, $pin);
+		}
+		else
+		{
+			// Пустая строка — незнакомый адрес: искать некого, и подстановка
+			// другого аккаунта была бы той самой утечкой.
+			$row = $slugOwnerId === '' ? null : self::findByOwner($slugOwnerId);
+		}
 		if ($row)
 		{
 			$accountKey = AttemptLimiter::accountKey((string)$row['UF_OWNER_ID']);

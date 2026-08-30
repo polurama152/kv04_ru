@@ -43,6 +43,12 @@ class Path
 		return self::base() . '/';
 	}
 
+	/** Личный адрес владельца: '/day/vadim/'. Пустой адрес — общая страница. */
+	public static function personalUrl(string $slug): string
+	{
+		return $slug === '' ? self::url() : self::url() . $slug . '/';
+	}
+
 	/** Адреса, по которым дневник жил раньше. */
 	public static function legacy(): array
 	{
@@ -161,6 +167,24 @@ class Path
 		}
 		$rules[] = ['CONDITION' => '#^' . $quoted . '/sw\.js(\?.*)?$#', 'PATH' => '/local/modules/kv04.diary/pub/sw.php'];
 		$rules[] = ['CONDITION' => '#^' . $quoted . '/manifest\.webmanifest(\?.*)?$#', 'PATH' => '/local/modules/kv04.diary/pub/manifest.php'];
+
+		// Личные адреса владельцев: /<путь>/<адрес>/. Одно правило на всех —
+		// адрес разбирает сам шелл, поэтому заводить и снимать правила при
+		// каждом новом владельце не нужно. Служебные имена сюда не попадают:
+		// в них есть точка, а адрес — только [a-z0-9_-].
+		$rules[] = [
+			'CONDITION' => '#^' . $quoted . '/([a-z0-9_-]+)/sw\.js(\?.*)?$#',
+			'PATH' => '/local/modules/kv04.diary/pub/sw.php',
+		];
+		$rules[] = [
+			'CONDITION' => '#^' . $quoted . '/([a-z0-9_-]+)/manifest\.webmanifest(\?.*)?$#',
+			'PATH' => '/local/modules/kv04.diary/pub/manifest.php',
+		];
+		$rules[] = [
+			'CONDITION' => '#^' . $quoted . '/([a-z0-9_-]+)/?(\?.*)?$#',
+			'RULE' => 'u=$1',
+			'PATH' => '/local/modules/kv04.diary/pub/index.php',
+		];
 
 		// Прежние адреса ведут туда же: шелл сам отвечает 301 на нынешний,
 		// а вернувшийся оттуда браузер снимает воркер устаревшего scope.

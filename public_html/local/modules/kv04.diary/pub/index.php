@@ -4,6 +4,7 @@ use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
 use Kv04\Diary\Path;
 use Kv04\Diary\ShareService;
+use Kv04\Diary\SlugService;
 
 /**
  * Страница дневника. Сюда приходят двумя дорогами: include из корневого
@@ -32,6 +33,29 @@ if (is_file($kv04DiaryLoad))
 $kv04DiaryToken = (string)($_GET['d'] ?? '');
 
 /**
+ * Личный адрес владельца (/<путь>/<адрес>/). Его подставляет rewrite-правило.
+ * Владельца по нему находим здесь, чтобы вход обошёлся без почты: адрес
+ * говорит, чей дневник, пин — тот ли это человек. Незнакомый адрес не 404 и
+ * не редирект: страница обязана выглядеть точно так же, как чужая, иначе по
+ * ответу можно было бы перечислить существующие адреса.
+ */
+$kv04DiarySlug = '';
+$kv04DiarySlugOwner = null;
+if ($kv04DiaryLoaded && $kv04DiaryToken === '')
+{
+	$kv04DiarySlugRaw = (string)($_GET['u'] ?? '');
+	if ($kv04DiarySlugRaw !== '')
+	{
+		$kv04DiarySlug = (string)(SlugService::normalize($kv04DiarySlugRaw) ?? '');
+		Installer::ensure();
+		// Пустая строка вместо null — «адрес в запросе был, но он ничей».
+		$kv04DiarySlugOwner = $kv04DiarySlug === ''
+			? ''
+			: (string)(SlugService::ownerBySlug($kv04DiarySlug) ?? '');
+	}
+}
+
+/**
  * Единственный адрес страницы — со слэшем на конце. Без него браузер не
  * считает страницу частью приложения: scope воркера равен «/путь/», а
  * «/путь» лежит вне его — тогда нет ни офлайна, ни предложения установки.
@@ -41,14 +65,15 @@ $kv04DiaryToken = (string)($_GET['d'] ?? '');
  * POST не трогаем: 301 превратил бы его в GET и молча съел вход по пину.
  */
 $kv04DiaryBase = $kv04DiaryLoaded ? Path::base() : '';
+$kv04DiaryCanonical = $kv04DiaryLoaded ? Path::personalUrl($kv04DiarySlug) : '/';
 $kv04RequestPath = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
 if ($kv04DiaryBase !== ''
 	&& $kv04DiaryToken === ''
 	&& ($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST'
-	&& $kv04RequestPath !== $kv04DiaryBase . '/')
+	&& $kv04RequestPath !== $kv04DiaryCanonical)
 {
 	CHTTP::SetStatus('301 Moved Permanently');
-	header('Location: ' . $kv04DiaryBase . '/');
+	header('Location: ' . $kv04DiaryCanonical);
 	die();
 }
 
@@ -65,8 +90,9 @@ if ($kv04DiaryToken !== '' && $kv04DiaryLoaded)
 
 $APPLICATION->SetTitle($kv04DiaryShare ? $kv04DiaryShare['title'] : 'Мой дневник');
 
-// '/day/' — от него зависят адреса манифеста и воркера.
-$kv04DiaryBaseUrl = $kv04DiaryLoaded ? Path::url() : '/';
+// Адреса манифеста и воркера — от канонического адреса этой страницы:
+// на личном адресе приложение своё, со своим scope и своим значком.
+$kv04DiaryBaseUrl = $kv04DiaryCanonical;
 
 /**
  * Статика отдаётся с Cache-Control на трое суток (mod_expires в .htaccess),
@@ -153,7 +179,10 @@ else
 	}
 	elseif (!Auth::isLoggedIn())
 	{
-		$APPLICATION->IncludeComponent('kv04:diary.pin', '.default', [], false);
+		$APPLICATION->IncludeComponent('kv04:diary.pin', '.default', [
+			'SLUG' => $kv04DiarySlug,
+			'SLUG_OWNER' => $kv04DiarySlugOwner,
+		], false);
 	}
 	else
 	{

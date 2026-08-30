@@ -11,6 +11,7 @@ use Kv04\Diary\NoteService;
 use Kv04\Diary\Path;
 use Kv04\Diary\PinService;
 use Kv04\Diary\ShareService;
+use Kv04\Diary\SlugService;
 
 class Kv04DiaryFeedComponent extends CBitrixComponent
 {
@@ -47,11 +48,15 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		// залогиненный админ сайта, ему показывается тихий ход в админку.
 		global $USER;
 		$this->arResult['SHOW_ADMIN_LINK'] = is_object($USER) && $USER->IsAdmin();
-		// Панель настроек: Bitrix-админу всегда, владельцу пина — по флагу
-		// owner_settings. Сам флаг меняется только в админке, иначе владелец
-		// выдал бы права сам себе.
-		$this->arResult['SHOW_SETTINGS'] = $this->arResult['SHOW_ADMIN_LINK'] || Path::ownerSettingsAllowed();
+		// Настройки есть у каждого владельца — но разные. Свой адрес правит
+		// любой: это его дверь. Путь всего дневника двигает только админ или
+		// владелец при флаге owner_settings — он общий на всех, и сосед не
+		// должен переселять чужие приложения. Сам флаг меняется в админке,
+		// иначе владелец выдал бы права сам себе.
+		$this->arResult['SHOW_SETTINGS'] = true;
+		$this->arResult['SHOW_PATH_SETTING'] = $this->arResult['SHOW_ADMIN_LINK'] || Path::ownerSettingsAllowed();
 		$this->arResult['DIARY_PATH'] = Path::raw();
+		$this->arResult['DIARY_SLUG'] = SlugService::forOwner($ownerId);
 		// Планировщика у модуля нет, агенты Bitrix на этом хостинге не крутятся,
 		// поэтому просроченное чистим изредка на показе ленты — и всегда при
 		// открытии корзины.
@@ -153,7 +158,7 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 
 		if ($action === 'settings_save')
 		{
-			$this->json($this->saveSettings());
+			$this->json($this->saveSettings($ownerId));
 			return;
 		}
 
@@ -214,30 +219,55 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 	}
 
 	/**
-	 * Путь дневника из панели настроек. Пин-сессия уже проверена в
-	 * executeComponent, здесь — само право на настройки: та же формула,
-	 * что открывает панель в шаблоне.
+	 * Настройки из панели. Пин-сессия уже проверена в executeComponent:
+	 * личный адрес правит сам владелец, общий путь — только тот, кому это
+	 * позволено (та же формула, что открывает поле в шаблоне).
 	 */
-	private function saveSettings(): array
+	private function saveSettings(string $ownerId): array
 	{
-		global $USER;
-		$isAdmin = is_object($USER) && $USER->IsAdmin();
-		if (!$isAdmin && !Path::ownerSettingsAllowed())
+		$warning = '';
+
+		if ($this->request->getPost('path') !== null)
 		{
-			return ['ok' => false, 'error' => 'Настройки доступны только администратору'];
+			global $USER;
+			$isAdmin = is_object($USER) && $USER->IsAdmin();
+			if (!$isAdmin && !Path::ownerSettingsAllowed())
+			{
+				return ['ok' => false, 'error' => 'Общий путь дневника меняет только администратор'];
+			}
+
+			$path = Path::save((string)$this->request->getPost('path'));
+			if ($path === null)
+			{
+				return ['ok' => false, 'error' => 'Путь обязателен: латиница, цифры, дефис и подчёркивание; bitrix, local, upload и d заняты'];
+			}
+			if (Path::collides($path))
+			{
+				$warning = 'На сайте уже есть файл или папка «' . explode('/', $path, 2)[0]
+					. '» — она перехватит адрес раньше дневника. Лучше выбрать другой путь.';
+			}
 		}
 
-		$path = Path::save((string)$this->request->getPost('path'));
-		if ($path === null)
+		$slug = SlugService::forOwner($ownerId);
+		if ($this->request->getPost('slug') !== null)
 		{
-			return ['ok' => false, 'error' => 'Путь обязателен: латиница, цифры, дефис и подчёркивание; bitrix, local, upload и d заняты'];
+			$saved = SlugService::save($ownerId, (string)$this->request->getPost('slug'));
+			if (empty($saved['ok']))
+			{
+				return $saved;
+			}
+			$slug = (string)$saved['slug'];
 		}
 
-		$result = ['ok' => true, 'path' => $path, 'url' => Path::url()];
-		if (Path::collides($path))
+		$result = [
+			'ok' => true,
+			'path' => Path::raw(),
+			'slug' => $slug,
+			'url' => Path::personalUrl($slug),
+		];
+		if ($warning !== '')
 		{
-			$result['warning'] = 'На сайте уже есть файл или папка «' . explode('/', $path, 2)[0]
-				. '» — она перехватит адрес раньше дневника. Лучше выбрать другой путь.';
+			$result['warning'] = $warning;
 		}
 
 		return $result;
