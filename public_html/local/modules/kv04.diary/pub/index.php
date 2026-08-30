@@ -30,6 +30,28 @@ if (is_file($kv04DiaryLoad))
  * ответу нельзя было понять, была ли когда-нибудь такая ссылка.
  */
 $kv04DiaryToken = (string)($_GET['d'] ?? '');
+
+/**
+ * Единственный адрес страницы — со слэшем на конце. Без него браузер не
+ * считает страницу частью приложения: scope воркера равен «/путь/», а
+ * «/путь» лежит вне его — тогда нет ни офлайна, ни предложения установки.
+ * Сюда же приходят прежние адреса дневника после переезда, и этот же 301
+ * возвращает их владельцам установленный значок.
+ *
+ * POST не трогаем: 301 превратил бы его в GET и молча съел вход по пину.
+ */
+$kv04DiaryBase = $kv04DiaryLoaded ? Path::base() : '';
+$kv04RequestPath = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+if ($kv04DiaryBase !== ''
+	&& $kv04DiaryToken === ''
+	&& ($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST'
+	&& $kv04RequestPath !== $kv04DiaryBase . '/')
+{
+	CHTTP::SetStatus('301 Moved Permanently');
+	header('Location: ' . $kv04DiaryBase . '/');
+	die();
+}
+
 $kv04DiaryShare = null;
 if ($kv04DiaryToken !== '' && $kv04DiaryLoaded)
 {
@@ -43,7 +65,7 @@ if ($kv04DiaryToken !== '' && $kv04DiaryLoaded)
 
 $APPLICATION->SetTitle($kv04DiaryShare ? $kv04DiaryShare['title'] : 'Мой дневник');
 
-// '/day/' или '/' — от него зависят адреса манифеста и воркера.
+// '/day/' — от него зависят адреса манифеста и воркера.
 $kv04DiaryBaseUrl = $kv04DiaryLoaded ? Path::url() : '/';
 
 /**

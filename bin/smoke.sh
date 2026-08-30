@@ -16,7 +16,10 @@ SITE=https://kv04.ru
 PHP_BIN=/usr/bin/php8.4
 # Путь дневника (опция kv04.diary → path). Пусто — дневник на корне.
 # Менять синхронно с настройкой в приложении или админке.
-DIARY_PATH=day
+DIARY_PATH=uday
+# Прежний адрес: с него обязан идти 301, иначе установленные приложения
+# после переезда открывали бы 404 (спека 0004).
+LEGACY_PATH=day
 
 cd "$(dirname "$0")/.." || exit 2
 
@@ -44,6 +47,17 @@ fi
 code=$(curl -sSL -o "$body" -w '%{http_code}' "$DIARY_URL/")
 [ "$code" = 200 ] && ok "дневник 200" || bad "дневник: код $code"
 grep -q 'Мой дневник' "$body" && ok "пин-пад на месте" || bad "пин-пад не найден в ответе дневника"
+
+# 1в. Адрес без слэша уводит на канонический: только он попадает в scope
+# воркера, а значит даёт офлайн и предложение установки.
+loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$DIARY_URL")
+[ "$loc" = "$DIARY_URL/" ] && ok "адрес без слэша -> 301 на канонический" || bad "без слэша: Location $loc"
+
+# 1г. Прежний адрес не бросает установленные приложения.
+if [ -n "${LEGACY_PATH:-}" ]; then
+	loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$SITE/$LEGACY_PATH/")
+	[ "$loc" = "$DIARY_URL/" ] && ok "прежний /$LEGACY_PATH/ -> 301 на дневник" || bad "прежний /$LEGACY_PATH/: Location $loc"
+fi
 
 # 2. PWA: воркер и манифест отвечают с пути дневника.
 hdr=$(curl -sS -o "$body" -D - "$DIARY_URL/sw.js")

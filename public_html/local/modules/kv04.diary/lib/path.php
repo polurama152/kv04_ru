@@ -15,6 +15,10 @@ class Path
 {
 	public const OPTION = 'path';
 	public const OPTION_OWNER_SETTINGS = 'owner_settings';
+	/** Прежние адреса дневника — с них ведём 301 на нынешний. */
+	public const OPTION_LEGACY = 'legacy_paths';
+	/** Глубина памяти о переездах: дальше адреса уже никто не помнит. */
+	private const LEGACY_LIMIT = 5;
 	/** Имя всех rewrite-правил модуля — по нему же они и снимаются. */
 	private const RULE_ID = 'kv04.diary';
 	/** Занято движком и самим дневником (/d/<токен> — глобальный). */
@@ -37,6 +41,20 @@ class Path
 	public static function url(): string
 	{
 		return self::base() . '/';
+	}
+
+	/** Адреса, по которым дневник жил раньше. */
+	public static function legacy(): array
+	{
+		$raw = (string)Option::get(Installer::MODULE_ID, self::OPTION_LEGACY, '');
+		if ($raw === '')
+		{
+			return [];
+		}
+
+		$list = json_decode($raw, true);
+
+		return is_array($list) ? array_values(array_filter($list, 'is_string')) : [];
 	}
 
 	/** Владельцам пина разрешено менять настройки из приложения. */
@@ -92,10 +110,32 @@ class Path
 			return null;
 		}
 
+		self::rememberLegacy(self::raw(), $path);
 		Option::set(Installer::MODULE_ID, self::OPTION, $path);
 		self::applyRewrite();
 
 		return $path;
+	}
+
+	/**
+	 * Переезд не должен убивать установленные приложения: прежний адрес
+	 * остаётся живым и ведёт 301 на нынешний, поэтому значок на телефоне
+	 * продолжает открывать дневник, а не 404.
+	 */
+	private static function rememberLegacy(string $oldPath, string $newPath): void
+	{
+		if ($oldPath === '' || $oldPath === $newPath)
+		{
+			return;
+		}
+
+		$list = self::legacy();
+		array_unshift($list, $oldPath);
+		// Нынешний адрес в списке прежних не место: он обслуживается сам.
+		$list = array_diff(array_unique($list), [$newPath]);
+		$list = array_slice(array_values($list), 0, self::LEGACY_LIMIT);
+
+		Option::set(Installer::MODULE_ID, self::OPTION_LEGACY, json_encode($list, JSON_UNESCAPED_SLASHES));
 	}
 
 	/**
@@ -121,6 +161,16 @@ class Path
 		}
 		$rules[] = ['CONDITION' => '#^' . $quoted . '/sw\.js(\?.*)?$#', 'PATH' => '/local/modules/kv04.diary/pub/sw.php'];
 		$rules[] = ['CONDITION' => '#^' . $quoted . '/manifest\.webmanifest(\?.*)?$#', 'PATH' => '/local/modules/kv04.diary/pub/manifest.php'];
+
+		// Прежние адреса ведут туда же: шелл сам отвечает 301 на нынешний,
+		// а вернувшийся оттуда браузер снимает воркер устаревшего scope.
+		foreach (self::legacy() as $legacy)
+		{
+			$rules[] = [
+				'CONDITION' => '#^/' . preg_quote($legacy, '#') . '/?(\?.*)?$#',
+				'PATH' => '/local/modules/kv04.diary/pub/index.php',
+			];
+		}
 
 		foreach ($rules as $rule)
 		{
