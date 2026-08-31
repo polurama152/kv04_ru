@@ -1,0 +1,36 @@
+# Компоненты `kv04:*`
+
+Общие правила проекта — `/CLAUDE.md` в корне репозитория.
+
+Имя: `kv04:<area>.<action>` (`kv04:diary.pin`). Логика в `class.php` (`CBitrixComponent`),
+разметка в `templates/.default/`. Параметры — `UPPER_SNAKE`.
+
+```
+component/
+  class.php, .description.php, .parameters.php
+  templates/.default/{template.php, script.js, style.css}
+  lang/ru/
+```
+
+## Слой
+
+- Компонент: sessid, POST/AJAX, `arResult`, шаблон. Без HL/iblock-SQL.
+- Сервис модуля: домен (пин, заметки, сессия).
+- Мутации только при `POST && check_bitrix_sessid()`. Ответ AJAX — JSON, `bitrix_sessid()`
+  в шаблон.
+
+```php
+// ❌ BAD
+HighloadBlockTable::getList(...); // внутри class.php
+
+// ✅ GOOD
+if ($this->request->isPost() && check_bitrix_sessid())
+{
+	$result = PinService::login($pin);
+	$this->json($result);
+}
+```
+
+Пока нет `.description.php` / `lang/` — добавить до выкладки на Маркетплейс. Кэш публичной
+ленты дневника: `CACHE_TYPE=N` (персональные данные). AJAX-ошибка «Нет связи» часто =
+HTTP 500 (HTML вместо JSON).

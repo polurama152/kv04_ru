@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "bitrix": {
+      "type": "http",
+      "url": "https://bxmcp.camouf.ru"
+    }
+  }
+}

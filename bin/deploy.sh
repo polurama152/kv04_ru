@@ -25,7 +25,9 @@ CHECK_ONLY=0
 # поэтому наружу уходит один ssh, а не по вызову на файл.
 manifest=$(mktemp)
 trap 'rm -f "$manifest"' EXIT
-find "${CUSTOM[@]}" -type f -print0 | sort -z | xargs -0 md5sum > "$manifest"
+# CLAUDE.md лежат рядом с кодом (правила подтягиваются по адресу задачи),
+# но на сервере им делать нечего — из манифеста исключаем.
+find "${CUSTOM[@]}" -type f -not -name 'CLAUDE.md' -print0 | sort -z | xargs -0 md5sum > "$manifest"
 
 drift() {
 	ssh -o BatchMode=yes "$HOST" "cd $REMOTE_ROOT && md5sum -c --quiet -" < "$manifest" 2>&1 \
