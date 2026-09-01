@@ -43,5 +43,6 @@ if (class_exists(Loader::class))
 		'Kv04\\Diary\\Html' => '/local/modules/kv04.diary/lib/html.php',
 		'Kv04\\Diary\\Path' => '/local/modules/kv04.diary/lib/path.php',
 		'Kv04\\Diary\\SlugService' => '/local/modules/kv04.diary/lib/slugservice.php',
+		'Kv04\\Diary\\ResetService' => '/local/modules/kv04.diary/lib/resetservice.php',
 	]);
 }

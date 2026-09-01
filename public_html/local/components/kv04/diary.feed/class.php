@@ -10,6 +10,7 @@ use Kv04\Diary\BookService;
 use Kv04\Diary\NoteService;
 use Kv04\Diary\Path;
 use Kv04\Diary\PinService;
+use Kv04\Diary\ResetService;
 use Kv04\Diary\ShareService;
 use Kv04\Diary\SlugService;
 
@@ -43,6 +44,9 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		// Дневник, заведённый до появления идентичности, просим привязать почту:
 		// без неё он остаётся в переходной ветке, где пин ищется глобально.
 		$this->arResult['NEEDS_EMAIL'] = !PinService::hasEmail($ownerId);
+		// Пин меняют только при живой почте: она — единственный путь назад,
+		// и менять ключ, не имея запасного, значит однажды остаться снаружи.
+		$this->arResult['PIN_EMAIL'] = self::maskEmail(PinService::emailFor($ownerId));
 		$this->arResult['TRASH_DAYS'] = (int)ceil(NoteService::TRASH_TTL / 86400);
 		// Bitrix-сессия живёт отдельно от пин-входа: если лентой пользуется
 		// залогиненный админ сайта, ему показывается тихий ход в админку.
@@ -63,6 +67,7 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		if (random_int(1, 20) === 1)
 		{
 			NoteService::purgeExpired();
+			ResetService::purgeExpired();
 		}
 		// Дневников под одним пином может быть несколько; лента показывает
 		// открытый. currentId() сам заводит первый и подбирает в него старые
@@ -153,6 +158,16 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		if ($action === 'attach_email')
 		{
 			$this->json(PinService::attachEmail($ownerId, (string)$this->request->getPost('email')));
+			return;
+		}
+
+		if ($action === 'pin_change')
+		{
+			$this->json(PinService::changePin(
+				$ownerId,
+				(string)$this->request->getPost('pin'),
+				(string)$this->request->getPost('pin_confirm')
+			));
 			return;
 		}
 
@@ -271,6 +286,21 @@ class Kv04DiaryFeedComponent extends CBitrixComponent
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Почта в настройках показывается прикрытой: панель открывают за столом,
+	 * где через плечо видно экран, а владельцу довольно узнать свой ящик.
+	 */
+	private static function maskEmail(string $email): string
+	{
+		$at = strpos($email, '@');
+		if ($at === false)
+		{
+			return '';
+		}
+
+		return mb_substr($email, 0, 1) . '***' . mb_substr($email, $at);
 	}
 
 	private function normalizeFiles(array $files): array

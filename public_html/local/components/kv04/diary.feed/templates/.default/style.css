@@ -1500,6 +1500,25 @@ body.kv04-lightbox-open {
 	color: var(--kv04-danger, #e05d5d);
 }
 
+/* Смена пина: своя кнопка и свой статус, чтобы не путать с «Сохранить». */
+.kv04-settings__pin .kv04-settings__row {
+	margin-bottom: 0.5rem;
+}
+
+.kv04-settings__pin-input {
+	flex: 0 0 6rem;
+	width: 6rem;
+	font-size: 0.9rem;
+	letter-spacing: 0.3em;
+	text-align: center;
+}
+
+.kv04-settings__pin [data-pin-email] {
+	flex: 1 1 12rem;
+	min-width: 8rem;
+	font-size: 0.85rem;
+}
+
 .kv04-books__backdrop {
 	display: none;
 }

@@ -8,6 +8,7 @@ use Kv04\Diary\Auth;
 use Kv04\Diary\Installer;
 use Kv04\Diary\Path;
 use Kv04\Diary\PinService;
+use Kv04\Diary\ResetService;
 
 class Kv04DiaryPinComponent extends CBitrixComponent
 {
@@ -34,6 +35,13 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 		// существует он или нет.
 		$this->arResult['BOUND'] = Auth::boundOwnerId() !== null || $this->slugOwner() !== null;
 		$this->arResult['NEEDS_EMAIL'] = $this->slugOwner() === null && PinService::needsEmail();
+		// Ссылка из письма. Она не пускает внутрь: открывает форму нового пина
+		// и больше ничего — утёкшее письмо не должно читать записи тихо.
+		$token = (string)($this->arParams['RESET_TOKEN'] ?? '');
+		$this->arResult['RESET_TOKEN'] = $token;
+		$this->arResult['RESET_VALID'] = $token !== '' && ResetService::ownerByToken($token) !== null;
+		// На личном адресе спрашивать некого: адрес уже сказал, чей дневник.
+		$this->arResult['RESET_NEEDS_LOGIN'] = $this->slugOwner() === null;
 		// Адрес в регистрации обязателен, почта — нет: см. спеку 0006.
 		$this->arResult['DIARY_URL'] = Path::url();
 		$this->includeComponentTemplate();
@@ -56,8 +64,27 @@ class Kv04DiaryPinComponent extends CBitrixComponent
 			return;
 		}
 
+		if ($action === 'forgot')
+		{
+			$this->json(ResetService::request(
+				(string)$this->request->getPost('email'),
+				$this->slugOwner()
+			));
+			return;
+		}
+
 		$pin = (string)$this->request->getPost('pin');
 		$email = (string)$this->request->getPost('email');
+
+		if ($action === 'reset')
+		{
+			$this->json(ResetService::complete(
+				(string)$this->request->getPost('token'),
+				$pin,
+				(string)$this->request->getPost('pin_confirm')
+			));
+			return;
+		}
 
 		if ($action === 'create')
 		{

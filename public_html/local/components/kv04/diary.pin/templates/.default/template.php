@@ -4,11 +4,29 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	die();
 }
 ?>
-<div class="kv04-pin" id="kv04-pin" data-needs-email="<?=$arResult['NEEDS_EMAIL'] ? '1' : '0'?>">
-	<h1 class="kv04-pin__title">Мой дневник</h1>
-	<p class="kv04-pin__hint"><?=$arResult['BOUND']
-		? 'С возвращением — введите пин'
-		: 'Четыре цифры — ключ только для вас'?></p>
+<?php
+$kv04Resetting = !empty($arResult['RESET_VALID']);
+$kv04ResetStale = (string)($arResult['RESET_TOKEN'] ?? '') !== '' && !$kv04Resetting;
+?>
+<div class="kv04-pin" id="kv04-pin" data-needs-email="<?=$arResult['NEEDS_EMAIL'] ? '1' : '0'?>"
+	data-reset-token="<?=htmlspecialcharsbx((string)($arResult['RESET_TOKEN'] ?? ''))?>"
+	data-reset-valid="<?=$kv04Resetting ? '1' : '0'?>"
+	data-reset-login="<?=!empty($arResult['RESET_NEEDS_LOGIN']) ? '1' : '0'?>">
+	<h1 class="kv04-pin__title"><?=$kv04Resetting ? 'Новый пин' : 'Мой дневник'?></h1>
+	<p class="kv04-pin__hint"><?php
+	if ($kv04Resetting)
+	{
+		echo 'Придумайте четыре цифры и повторите их';
+	}
+	elseif ($kv04ResetStale)
+	{
+		echo 'Ссылка устарела или уже сработала — запросите новую';
+	}
+	else
+	{
+		echo $arResult['BOUND'] ? 'С возвращением — введите пин' : 'Четыре цифры — ключ только для вас';
+	}
+	?></p>
 
 	<div class="kv04-pin__slug" data-slug-box hidden>
 		<label for="kv04-pin-slug">Адрес дневника</label>
@@ -63,10 +81,12 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 
 	<p class="kv04-pin__error" data-error hidden></p>
 
-	<div class="kv04-pin__actions">
+	<div class="kv04-pin__actions"<?=$kv04Resetting ? ' hidden' : ''?>>
 		<button type="button" class="kv04-btn kv04-btn--ghost" data-create>Создать дневник</button>
+		<?php /* Возврат доступа — только по почте: другого пути назад у дневника нет. */ ?>
+		<button type="button" class="kv04-pin__forgot" data-forgot>Забыл пин</button>
 	</div>
-<?php if ($arResult['BOUND']): ?>
+<?php if ($arResult['BOUND'] && !$kv04Resetting): ?>
 	<button type="button" class="kv04-pin__forget" data-forget>Это не мой дневник</button>
 <?php endif; ?>
 </div>
@@ -88,6 +108,14 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	var slugInput = root.querySelector('[data-slug]');
 	var forgetBtn = root.querySelector('[data-forget]');
 	var needsEmail = root.getAttribute('data-needs-email') === '1';
+	var forgotBtn = root.querySelector('[data-forgot]');
+	// Ссылка из письма: эта форма меняет пин и внутрь не пускает — по ней
+	// нельзя тихо прочитать записи, можно только задать новый ключ.
+	var resetToken = root.getAttribute('data-reset-token') || '';
+	var resetting = resetToken !== '' && root.getAttribute('data-reset-valid') === '1';
+	var resetNeedsLogin = root.getAttribute('data-reset-login') === '1';
+	// Режим «пришлите письмо»: поле почты занято под запрос, а не под вход.
+	var forgetting = false;
 	var creating = false;
 	var sending = false;
 	// Длина пина на прошлом шаге. Нужна, чтобы отличить набор от подстановки:
@@ -105,6 +133,13 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	function setError(msg) {
 		error.hidden = !msg;
 		error.textContent = msg || '';
+		error.classList.remove('is-note');
+	}
+	/** Тот же абзац, но спокойным цветом: «письмо ушло» — не ошибка. */
+	function setNote(msg) {
+		error.hidden = !msg;
+		error.textContent = msg || '';
+		error.classList.add('is-note');
 	}
 	/**
 	 * Единая точка после любого изменения пина.
@@ -128,7 +163,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	 * По фокусу решать нельзя: тап по кнопке пада сам забирает фокус.
 	 */
 	function padTargetsConfirm() {
-		return creating && !confirmBox.hidden && pinInput.value.length >= 4;
+		return (creating || resetting) && !confirmBox.hidden && pinInput.value.length >= 4;
 	}
 	function appendDigit(d) {
 		if (padTargetsConfirm()) {
@@ -147,9 +182,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		}
 	}
 	function clearPin() {
-		// При создании «C» — начать ввод заново целиком: полупустое
+		// При создании и смене «C» — начать ввод заново целиком: полупустое
 		// подтверждение при полном пине только путало бы.
-		if (creating) {
+		if (creating || resetting) {
 			confirmInput.value = '';
 			lastConfirmLength = 0;
 		}
@@ -181,12 +216,24 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	 */
 	function maybeSubmit(explicit) {
 		if (sending) return;
+		// Пока ждём письмо, цифры не значат ничего: аккаунт ещё не назван.
+		if (forgetting) return;
 
 		// Порядок важен: сначала пин, потом всё остальное. Проверять почту
 		// раньше нельзя — метод зовётся на каждую цифру, и фокус уезжал бы
 		// из пин-поля уже на первой.
 		if (pinInput.value.length < 4) {
 			if (explicit) setError('Введите 4 цифры');
+			return;
+		}
+
+		if (resetting) {
+			if (confirmInput.value.length < 4) {
+				if (explicit) setError('Повторите пин');
+				confirmInput.focus();
+				return;
+			}
+			send('reset');
 			return;
 		}
 
@@ -217,7 +264,20 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 	function handleEnter() {
 		maybeSubmit(true);
 	}
+	function cancelForgot() {
+		forgetting = false;
+		if (forgotBtn) forgotBtn.textContent = 'Забыл пин';
+		if (emailBox) emailBox.hidden = !needsEmail;
+		if (emailLabel) emailLabel.textContent = 'Почта или адрес';
+		if (emailNote) emailNote.hidden = true;
+		setError('');
+		pinInput.focus();
+	}
 	function handleEscape() {
+		if (forgetting) {
+			cancelForgot();
+			return;
+		}
 		if (!error.hidden && error.textContent) {
 			setError('');
 		} else {
@@ -241,16 +301,36 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		body.append('action', action);
 		body.append('pin', pinInput.value);
 		// На знакомом устройстве почта не нужна: аккаунт известен по привязке.
-		if (emailInput && (action === 'create' || needsEmail)) {
+		// Запросу письма она нужна всегда — кроме личного адреса, который сам
+		// говорит, чей это дневник.
+		if (emailInput && (action === 'create' || action === 'forgot' || needsEmail)) {
 			body.append('email', emailInput.value);
 		}
-		if (action === 'create') {
+		if (action === 'create' || action === 'reset') {
 			body.append('pin_confirm', confirmInput.value);
+		}
+		if (action === 'create') {
 			body.append('slug', slugInput ? slugInput.value : '');
+		}
+		if (action === 'reset') {
+			body.append('token', resetToken);
 		}
 		fetch(location.href, { method: 'POST', body: body, credentials: 'same-origin' })
 			.then(function (r) { return r.json(); })
 			.then(function (data) {
+				// Письмо: ответ один на все случаи, поэтому просто показываем его.
+				if (data.ok && data.message) {
+					sending = false;
+					setNote(data.message);
+					return;
+				}
+				// Пин сменён по ссылке. Внутрь не пускаем — уводим на пин-пад,
+				// где новый ключ сразу и набирается.
+				if (data.ok && action === 'reset' && data.url) {
+					setNote('Пин сменён — войдите новым');
+					setTimeout(function () { location.href = data.url; }, 1200);
+					return;
+				}
 				// Дневник заведён — уходим на его собственный адрес.
 				if (data.ok && data.url) {
 					location.href = data.url;
@@ -275,7 +355,7 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 
 	function failReset() {
 		clearPin();
-		if (creating) {
+		if (creating || resetting) {
 			confirmInput.value = '';
 			lastConfirmLength = 0;
 		}
@@ -325,6 +405,31 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 			send('forget_device');
 		});
 	}
+	if (forgotBtn) {
+		forgotBtn.addEventListener('click', function () {
+			// Первый клик открывает поле «почта или адрес», второй шлёт письмо.
+			// На личном адресе спрашивать нечего — шлём сразу.
+			if (!forgetting && resetNeedsLogin) {
+				forgetting = true;
+				if (emailBox) emailBox.hidden = false;
+				if (emailLabel) emailLabel.textContent = 'Почта или адрес дневника';
+				if (emailNote) {
+					emailNote.hidden = false;
+					emailNote.textContent = 'Пришлём письмо со ссылкой на смену пина. Ссылка живёт час.';
+				}
+				forgotBtn.textContent = 'Прислать письмо';
+				setError('');
+				if (emailInput) emailInput.focus();
+				return;
+			}
+			if (resetNeedsLogin && !emailFilled()) {
+				setError('Введите почту или адрес дневника');
+				if (emailInput) emailInput.focus();
+				return;
+			}
+			send('forgot');
+		});
+	}
 	pinInput.addEventListener('input', function () {
 		pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 4);
 		syncPin(true);
@@ -343,6 +448,10 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		emailInput.addEventListener('keydown', function (e) {
 			if (e.key !== 'Enter') return;
 			e.preventDefault();
+			if (forgetting) {
+				send('forgot');
+				return;
+			}
 			// С почтой разобрались — дальше пин.
 			if (pinInput.value.length < 4) {
 				pinInput.focus();
@@ -374,6 +483,9 @@ if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true)
 		}
 	});
 	renderDots();
+	if (resetting) {
+		confirmBox.hidden = false;
+	}
 	if (needsEmail && emailInput) {
 		emailInput.focus();
 	} else {

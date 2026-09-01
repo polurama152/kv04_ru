@@ -107,6 +107,36 @@ foreach ($kv04Books as $kv04Book)
 			<button type="button" class="kv04-btn kv04-btn--primary kv04-btn--sm" data-settings-save>Сохранить</button>
 		</div>
 		<p class="kv04-settings__status" data-settings-status hidden></p>
+
+		<?php /* Пин меняется отдельной кнопкой, а не общим «Сохранить»: адрес
+		   правят между делом, а ключ от дневника — нет. */ ?>
+		<div class="kv04-settings__pin" data-pin-box data-has-email="<?=$arResult['PIN_EMAIL'] !== '' ? '1' : '0'?>">
+			<span class="kv04-settings__label kv04-settings__label--next">Пин</span>
+
+			<div class="kv04-settings__row" data-pin-email-row<?=$arResult['PIN_EMAIL'] !== '' ? ' hidden' : ''?>>
+				<input type="email" id="kv04-settings-email" class="kv04-input" data-pin-email
+					placeholder="you@example.com" autocomplete="email" spellcheck="false" autocapitalize="off">
+				<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-pin-email-save>Привязать</button>
+			</div>
+			<p class="kv04-settings__note" data-pin-email-note<?=$arResult['PIN_EMAIL'] !== '' ? ' hidden' : ''?>>Сначала
+				почта: пин — четыре цифры, и забытый не вернуть ничем другим. Дневник не знает о вас
+				больше ничего и писем не шлёт.</p>
+
+			<div class="kv04-settings__row" data-pin-row<?=$arResult['PIN_EMAIL'] === '' ? ' hidden' : ''?>>
+				<input type="password" inputmode="numeric" maxlength="4" class="kv04-input kv04-settings__pin-input"
+					data-pin-new placeholder="новый пин" autocomplete="new-password"
+					data-lpignore="true" data-1p-ignore data-bwignore>
+				<input type="password" inputmode="numeric" maxlength="4" class="kv04-input kv04-settings__pin-input"
+					data-pin-confirm placeholder="ещё раз" autocomplete="new-password"
+					data-lpignore="true" data-1p-ignore data-bwignore>
+				<button type="button" class="kv04-btn kv04-btn--muted kv04-btn--sm" data-pin-save>Сменить</button>
+			</div>
+			<p class="kv04-settings__note" data-pin-note<?=$arResult['PIN_EMAIL'] === '' ? ' hidden' : ''?>>Остальные
+				устройства после смены выйдут из дневника — на них понадобится новый пин.
+				Возврат доступа: <span data-pin-email-shown><?=htmlspecialcharsbx((string)$arResult['PIN_EMAIL'])?></span>.</p>
+
+			<p class="kv04-settings__status" data-pin-status hidden></p>
+		</div>
 	</div>
 <?php endif; ?>
 

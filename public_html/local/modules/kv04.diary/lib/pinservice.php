@@ -11,6 +11,9 @@ class PinService
 {
 	public const PIN_LENGTH = 4;
 
+	/** Метки смены пина, прочитанные в этом процессе: их спрашивает каждый запрос. */
+	private static array $changedAt = [];
+
 	public static function pepper(): string
 	{
 		return (string)Option::get(Installer::MODULE_ID, 'pepper', '');
@@ -221,6 +224,126 @@ class PinService
 		return ['ok' => true];
 	}
 
+	/**
+	 * Смена пина изнутри дневника. Старый пин не спрашиваем: сессия уже
+	 * подтверждена им на входе. Зато требуем привязанную почту — пин без
+	 * запасного пути забывается насмерть, и позволить человеку молча
+	 * запереть себя дневник не должен.
+	 */
+	public static function changePin(string $ownerId, string $pin, string $confirm): array
+	{
+		$row = self::findByOwner($ownerId);
+		if (!$row)
+		{
+			return ['ok' => false, 'error' => 'Дневник не найден'];
+		}
+		if ((string)$row['UF_EMAIL'] === '')
+		{
+			return ['ok' => false, 'error' => 'Сначала привяжите почту — без неё забытый пин не вернуть'];
+		}
+
+		$pin = self::normalize($pin);
+		if (!self::isValidFormat($pin) || $pin !== self::normalize($confirm))
+		{
+			return ['ok' => false, 'error' => 'Пины не совпадают'];
+		}
+		if (hash_equals((string)$row['UF_PIN_HASH'], self::hashPin($pin)))
+		{
+			return ['ok' => false, 'error' => 'Это ваш нынешний пин'];
+		}
+
+		if (!self::setPin($ownerId, $pin))
+		{
+			return ['ok' => false, 'error' => 'Не удалось сменить пин'];
+		}
+
+		// Прочие устройства выпадают сами: метка смены изменилась, и Auth
+		// перестаёт признавать их cookie. Эту сессию переподписываем здесь же,
+		// иначе владелец вылетел бы вместе с ними.
+		Auth::login($ownerId);
+
+		return ['ok' => true];
+	}
+
+	/**
+	 * Записать пин. Метка времени — то, чем Auth отличает сессию, открытую
+	 * нынешним пином, от прежних: все остальные устройства перестают пускать
+	 * в ту же секунду. Ею же пользуется возврат доступа по письму.
+	 */
+	public static function setPin(string $ownerId, string $pin): bool
+	{
+		$row = self::findByOwner($ownerId);
+		if (!$row)
+		{
+			return false;
+		}
+
+		// Две смены в одну секунду дали бы одинаковую метку, и cookie первой
+		// пережила бы вторую. Поэтому метка обязана расти.
+		$stamp = max(time(), (int)$row['UF_PIN_CHANGED_AT'] + 1);
+		$result = self::dataClass()::update((int)$row['ID'], [
+			'UF_PIN_HASH' => self::hashPin($pin),
+			'UF_PIN_CHANGED_AT' => $stamp,
+		]);
+		if (!$result->isSuccess())
+		{
+			return false;
+		}
+		self::$changedAt[$ownerId] = $stamp;
+
+		return true;
+	}
+
+	/**
+	 * Когда у дневника последний раз меняли пин. Ноль — ни разу.
+	 * Значение спрашивает каждый запрос (Auth сверяет его с сессией),
+	 * поэтому держим прочитанное в памяти процесса.
+	 */
+	public static function changedAt(string $ownerId): int
+	{
+		if ($ownerId === '')
+		{
+			return 0;
+		}
+		if (!array_key_exists($ownerId, self::$changedAt))
+		{
+			$row = self::findByOwner($ownerId);
+			self::$changedAt[$ownerId] = $row ? (int)$row['UF_PIN_CHANGED_AT'] : 0;
+		}
+
+		return self::$changedAt[$ownerId];
+	}
+
+	/** Почта дневника или пусто, если её не привязывали. */
+	public static function emailFor(string $ownerId): string
+	{
+		$row = self::findByOwner($ownerId);
+
+		return $row ? (string)$row['UF_EMAIL'] : '';
+	}
+
+	/**
+	 * Владелец по тому, что набрали в поле «почта или адрес» — та же
+	 * развилка, что и на входе: собака отличает почту от адреса.
+	 */
+	public static function ownerByLogin(string $input): ?string
+	{
+		$input = trim($input);
+		if ($input === '')
+		{
+			return null;
+		}
+
+		if (!str_contains($input, '@'))
+		{
+			return SlugService::ownerBySlug($input);
+		}
+
+		$row = self::findByEmail(self::normalizeEmail($input));
+
+		return $row ? (string)$row['UF_OWNER_ID'] : null;
+	}
+
 	public static function normalizeEmail(string $email): string
 	{
 		return mb_strtolower(trim($email));
@@ -289,7 +412,7 @@ class PinService
 	private static function findOne(array $filter): ?array
 	{
 		$row = self::dataClass()::getList([
-			'select' => ['ID', 'UF_PIN_HASH', 'UF_OWNER_ID', 'UF_EMAIL'],
+			'select' => ['ID', 'UF_PIN_HASH', 'UF_OWNER_ID', 'UF_EMAIL', 'UF_PIN_CHANGED_AT'],
 			'filter' => $filter,
 			'limit' => 1,
 		])->fetch();
@@ -331,7 +454,7 @@ class PinService
 		return (bool)$row;
 	}
 
-	private static function lockedResult(int $wait): array
+	public static function lockedResult(int $wait): array
 	{
 		$human = AttemptLimiter::describeWait($wait);
 

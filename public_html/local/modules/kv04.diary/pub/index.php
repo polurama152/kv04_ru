@@ -24,6 +24,15 @@ if (is_file($kv04DiaryLoad))
 	$kv04DiaryLoaded = kv04DiaryLoadModule();
 }
 
+// Схему поднимаем до первого обращения к данным. Auth::isLoggedIn() ниже
+// читает метку смены пина, а её колонки на свежем сервере ещё нет — запрос
+// упал бы раньше, чем ensure() успел её создать. Повторные вызовы ниже
+// бесплатны: ensure() помнит, что уже отработал.
+if ($kv04DiaryLoaded)
+{
+	Installer::ensure();
+}
+
 /**
  * Дневник, открытый по ссылке. Разбираем до первой строчки разметки: от
  * ответа зависит и заголовок страницы, и код ответа. Несуществующая и
@@ -31,6 +40,13 @@ if (is_file($kv04DiaryLoad))
  * ответу нельзя было понять, была ли когда-нибудь такая ссылка.
  */
 $kv04DiaryToken = (string)($_GET['d'] ?? '');
+
+/**
+ * Ссылка из письма «забыл пин». Она не пускает внутрь: страница показывает
+ * форму нового пина — даже вошедшему, иначе владелец, у которого сессия ещё
+ * жива, попал бы в ленту и не понял, зачем ходил по ссылке.
+ */
+$kv04DiaryReset = (string)($_GET['reset'] ?? '');
 
 /**
  * Личный адрес владельца (/<путь>/<адрес>/). Его подставляет rewrite-правило.
@@ -59,7 +75,9 @@ if ($kv04DiaryLoaded && $kv04DiaryToken === '')
 		if ($kv04DiarySlugOwner === '' && $kv04DiarySlug !== '' && SlugService::isMoved($kv04DiarySlug))
 		{
 			CHTTP::SetStatus('301 Moved Permanently');
-			header('Location: ' . Path::url());
+			// Ссылку на смену пина проносим через переезд: она живёт час, и
+			// потерять её из-за смены адреса значило бы запереть владельца.
+			header('Location: ' . Path::url() . ($kv04DiaryReset !== '' ? '?reset=' . urlencode($kv04DiaryReset) : ''));
 			die();
 		}
 	}
@@ -120,7 +138,7 @@ $kv04DiaryAsset = static function (string $path): string {
 $kv04DiaryThemeCss = '/local/modules/kv04.diary/assets/diary-theme.css';
 $kv04DiaryHljsCss = '/local/modules/kv04.diary/assets/highlight/atom-one-dark.min.css';
 $kv04DiaryComponentCss = '/local/components/kv04/diary.pin/templates/.default/style.css';
-$kv04DiaryFeed = $kv04DiaryLoaded && $kv04DiaryToken === '' && Auth::isLoggedIn();
+$kv04DiaryFeed = $kv04DiaryLoaded && $kv04DiaryToken === '' && $kv04DiaryReset === '' && Auth::isLoggedIn();
 // Заметки на странице по ссылке — те же, значит и стили ленты те же.
 if ($kv04DiaryFeed || $kv04DiaryShare)
 {
@@ -187,11 +205,12 @@ else
 			<?php
 		}
 	}
-	elseif (!Auth::isLoggedIn())
+	elseif ($kv04DiaryReset !== '' || !Auth::isLoggedIn())
 	{
 		$APPLICATION->IncludeComponent('kv04:diary.pin', '.default', [
 			'SLUG' => $kv04DiarySlug,
 			'SLUG_OWNER' => $kv04DiarySlugOwner,
+			'RESET_TOKEN' => $kv04DiaryReset,
 		], false);
 	}
 	else

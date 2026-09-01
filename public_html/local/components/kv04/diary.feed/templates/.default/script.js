@@ -1366,6 +1366,96 @@
 			e.preventDefault();
 			saveSettings();
 		});
+
+		// --- Пин -----------------------------------------------------------
+		//
+		// Порядок жёсткий: сначала почта, потом пин. Забытый пин возвращает
+		// только письмо, поэтому менять ключ, не имея запасного, дневник не
+		// даёт — и говорит об этом прямо, а не прячет кнопку.
+		var pinBox = settingsBox.querySelector('[data-pin-box]');
+		if (pinBox) {
+			var pinEmailRow = pinBox.querySelector('[data-pin-email-row]');
+			var pinEmailNote = pinBox.querySelector('[data-pin-email-note]');
+			var pinEmailInput = pinBox.querySelector('[data-pin-email]');
+			var pinEmailSave = pinBox.querySelector('[data-pin-email-save]');
+			var pinEmailShown = pinBox.querySelector('[data-pin-email-shown]');
+			var pinRow = pinBox.querySelector('[data-pin-row]');
+			var pinNote = pinBox.querySelector('[data-pin-note]');
+			var pinNew = pinBox.querySelector('[data-pin-new]');
+			var pinAgain = pinBox.querySelector('[data-pin-confirm]');
+			var pinSave = pinBox.querySelector('[data-pin-save]');
+			var pinStatus = pinBox.querySelector('[data-pin-status]');
+
+			var setPinStatus = function (msg, isError) {
+				pinStatus.hidden = !msg;
+				pinStatus.textContent = msg || '';
+				pinStatus.classList.toggle('is-error', !!isError);
+			};
+			// Та же маска, что рисует сервер: показать ящик, но не выдать его
+			// целиком тому, кто смотрит через плечо.
+			var maskEmail = function (value) {
+				var at = value.indexOf('@');
+				return at > 0 ? value.charAt(0) + '***' + value.slice(at) : value;
+			};
+
+			var attachEmail = function () {
+				var value = (pinEmailInput.value || '').trim();
+				if (!value) { setPinStatus('Введите почту', true); pinEmailInput.focus(); return; }
+				pinEmailSave.disabled = true;
+				setPinStatus('Сохраняю…', false);
+				post({ action: 'attach_email', email: value }).then(function (data) {
+					pinEmailSave.disabled = false;
+					if (!data.ok) { setPinStatus(data.error || 'Ошибка', true); return; }
+					pinEmailRow.hidden = true;
+					pinEmailNote.hidden = true;
+					pinRow.hidden = false;
+					pinNote.hidden = false;
+					if (pinEmailShown) pinEmailShown.textContent = maskEmail(value);
+					setPinStatus('Почта привязана — теперь можно менять пин', false);
+					pinNew.focus();
+					// Полоска-напоминание в ленте своё отработала.
+					var strip = root.querySelector('[data-attach-email]');
+					if (strip) strip.remove();
+				}).catch(function () {
+					pinEmailSave.disabled = false;
+					setPinStatus('Нет связи', true);
+				});
+			};
+
+			var changePin = function () {
+				var value = pinNew.value.trim();
+				var again = pinAgain.value.trim();
+				if (value.length < 4) { setPinStatus('Новый пин — четыре цифры', true); pinNew.focus(); return; }
+				if (value !== again) { setPinStatus('Пины не совпадают', true); pinAgain.focus(); return; }
+				pinSave.disabled = true;
+				setPinStatus('Меняю…', false);
+				post({ action: 'pin_change', pin: value, pin_confirm: again }).then(function (data) {
+					pinSave.disabled = false;
+					pinNew.value = '';
+					pinAgain.value = '';
+					if (!data.ok) { setPinStatus(data.error || 'Ошибка', true); return; }
+					setPinStatus('Пин сменён. Остальные устройства вышли из дневника.', false);
+				}).catch(function () {
+					pinSave.disabled = false;
+					setPinStatus('Нет связи', true);
+				});
+			};
+
+			[pinNew, pinAgain].forEach(function (el) {
+				el.addEventListener('input', function () {
+					el.value = el.value.replace(/\D/g, '').slice(0, 4);
+				});
+			});
+			pinEmailSave.addEventListener('click', attachEmail);
+			pinSave.addEventListener('click', changePin);
+			pinBox.addEventListener('keydown', function (e) {
+				if (e.key !== 'Enter') return;
+				e.preventDefault();
+				if (e.target === pinEmailInput) { attachEmail(); return; }
+				if (e.target === pinNew) { pinAgain.focus(); return; }
+				if (e.target === pinAgain) { changePin(); }
+			});
+		}
 	}
 
 	bindEditor(input, {

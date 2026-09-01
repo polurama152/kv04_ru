@@ -30,8 +30,10 @@ class Installer
 	 * 8: опция пути дневника и rewrite-правила под неё.
 	 * 9: таблица личных адресов владельцев.
 	 * 10: адрес пережил переезд — колонка MOVED_AT, у владельца несколько строк.
+	 * 11: смена пина — метка UF_PIN_CHANGED_AT, таблица ссылок на возврат
+	 * доступа и почтовое событие с шаблоном письма.
 	 */
-	private const SCHEMA_VERSION = '10';
+	private const SCHEMA_VERSION = '11';
 	private const OPTION_SCHEMA = 'schema_version';
 
 	/** Схема уже проверена в этом процессе. */
@@ -76,6 +78,8 @@ class Installer
 		self::ensureSharesTable();
 		self::ensureSlugsTable();
 		self::upgradeSlugsTable();
+		self::ensureResetsTable();
+		self::ensureMailEvent();
 		// Опция пути: живой сайт без неё продолжает жить на корне ('').
 		// Правила перекладываются здесь же, чтобы клиенту Маркетплейса
 		// хватило установки модуля без ручных шагов.
@@ -267,6 +271,98 @@ class Installer
 	}
 
 	/**
+	 * Ссылки на возврат доступа. Токен лежит хэшем: дамп таблицы не должен
+	 * превращаться в пачку рабочих ссылок. Уникальность по токену защищает
+	 * от повторной вставки, индекс по владельцу нужен гашению прежних ссылок.
+	 */
+	private static function ensureResetsTable(): void
+	{
+		$connection = Application::getConnection();
+		if ($connection->isTableExists(ResetService::TABLE))
+		{
+			return;
+		}
+
+		$connection->queryExecute(
+			'CREATE TABLE IF NOT EXISTS ' . ResetService::TABLE . ' ('
+			. 'ID INT NOT NULL AUTO_INCREMENT,'
+			. 'OWNER_ID VARCHAR(40) NOT NULL,'
+			. 'TOKEN CHAR(64) NOT NULL,'
+			. 'CREATED_AT INT NOT NULL DEFAULT 0,'
+			. 'EXPIRES_AT INT NOT NULL DEFAULT 0,'
+			. 'USED_AT INT NOT NULL DEFAULT 0,'
+			. 'PRIMARY KEY (ID),'
+			. 'UNIQUE INDEX UX_KV04_DIARY_RESETS_TOKEN (TOKEN),'
+			. 'INDEX IX_KV04_DIARY_RESETS_OWNER (OWNER_ID, USED_AT)'
+			. ') DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+		);
+	}
+
+	/**
+	 * Тип почтового события и шаблон письма. Шаблон заводим только вместе с
+	 * типом: администратор вправе переписать текст под свой сайт, и наша
+	 * переустановка не должна затирать его правку.
+	 */
+	private static function ensureMailEvent(): void
+	{
+		$existing = \CEventType::GetList(['EVENT_NAME' => ResetService::EVENT_NAME])->Fetch();
+		if ($existing)
+		{
+			return;
+		}
+
+		$type = new \CEventType();
+		$macros = "#EMAIL_TO# - почта получателя\n"
+			. "#RESET_URL# - ссылка на форму нового пина\n"
+			. "#DIARY_URL# - адрес дневника\n"
+			. '#TTL_MINUTES# - сколько минут живёт ссылка';
+		$type->Add([
+			'LID' => 'ru',
+			'EVENT_NAME' => ResetService::EVENT_NAME,
+			'EVENT_TYPE' => 'email',
+			'NAME' => 'Дневник: возврат доступа по забытому пину',
+			'DESCRIPTION' => $macros,
+		]);
+		$type->Add([
+			'LID' => 'en',
+			'EVENT_NAME' => ResetService::EVENT_NAME,
+			'EVENT_TYPE' => 'email',
+			'NAME' => 'Diary: forgotten pin recovery',
+			'DESCRIPTION' => $macros,
+		]);
+
+		$message = new \CEventMessage();
+		$message->Add([
+			'ACTIVE' => 'Y',
+			'EVENT_NAME' => ResetService::EVENT_NAME,
+			'LID' => self::siteIds(),
+			'EMAIL_FROM' => '#DEFAULT_EMAIL_FROM#',
+			'EMAIL_TO' => '#EMAIL_TO#',
+			'SUBJECT' => 'Новый пин для дневника',
+			'BODY_TYPE' => 'text',
+			// Письмо намеренно короткое и без записей: оно открывает форму
+			// нового пина, а не сам дневник.
+			'MESSAGE' => "Кто-то попросил сменить пин дневника #DIARY_URL#.\n\n"
+				. "Задать новый пин: #RESET_URL#\n\n"
+				. "Ссылка работает #TTL_MINUTES# минут и только один раз.\n"
+				. "Если это были не вы — ничего не делайте: пин останется прежним.",
+		]);
+	}
+
+	/** Шаблон вешаем на все сайты установки: какой из них дневник — решает путь. */
+	private static function siteIds(): array
+	{
+		$ids = [];
+		$rows = \Bitrix\Main\SiteTable::getList(['select' => ['LID']])->fetchAll();
+		foreach ($rows as $row)
+		{
+			$ids[] = (string)$row['LID'];
+		}
+
+		return $ids ?: ['s1'];
+	}
+
+	/**
 	 * Схема применена, если совпала версия и на месте все три опции.
 	 * Идентификаторы проверяем отдельно: если HL или инфоблок удалили руками,
 	 * ensure() отработает заново, а не сочтёт себя молча выполненным.
@@ -330,6 +426,10 @@ class Installer
 		// поиск, а HL не даёт ни индексов, ни регистронезависимого сравнения
 		// на уровне схемы.
 		self::ensureUserField($entityId, 'UF_EMAIL', 'string', ['SIZE' => 180, 'ROWS' => 1]);
+		// Когда пин меняли последний раз. Ноль — ни разу. Метка уезжает в
+		// сессию и cookie: по ней Auth отличает устройства, вошедшие нынешним
+		// пином, от тех, что помнят прежний.
+		self::ensureUserField($entityId, 'UF_PIN_CHANGED_AT', 'integer', []);
 		// Осталось от прежней модели «пин = идентификатор»: счётчики теперь
 		// в kv04_diary_attempts. Поля не удаляем — снос UF роняет колонку.
 		self::ensureUserField($entityId, 'UF_FAILS', 'integer', []);

@@ -113,6 +113,27 @@
 	font-size: 0.9rem;
 }
 
+/* «Письмо ушло» — не ошибка: тот же абзац, спокойный цвет. */
+.kv04-pin__error.is-note {
+	color: var(--kv04-text-muted);
+}
+
+/* «Забыл пин» — тихая ссылка под кнопкой создания, а не третья кнопка. */
+.kv04-pin__forgot {
+	padding: 0.25rem 0.5rem;
+	border: 0;
+	background: none;
+	color: var(--kv04-text-muted);
+	font: inherit;
+	font-size: 0.85rem;
+	cursor: pointer;
+}
+
+.kv04-pin__forgot:hover,
+.kv04-pin__forgot:focus-visible {
+	color: var(--kv04-accent);
+}
+
 .kv04-pin__actions {
 	display: flex;
 	flex-direction: column;
