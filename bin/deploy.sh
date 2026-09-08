@@ -29,12 +29,22 @@ trap 'rm -f "$manifest"' EXIT
 # но на сервере им делать нечего — из манифеста исключаем.
 find "${CUSTOM[@]}" -type f -not -name 'CLAUDE.md' -print0 | sort -z | xargs -0 md5sum > "$manifest"
 
+# Код возврата важен: md5sum -c отвечает 0 при полном совпадении и 1 при
+# расхождениях, всё прочее — упавший ssh. Без этой проверки тишина упавшего
+# ssh неотличима от «всё совпало», и деплой рапортует OK, ничего не сверив
+# (случилось 2026-09-08 под load average 17).
 drift() {
-	ssh -o BatchMode=yes "$HOST" "cd $REMOTE_ROOT && md5sum -c --quiet -" < "$manifest" 2>&1 \
-		| sed -n 's/^\(.*\): FAILED.*$/\1/p' | sort -u
+	local out rc
+	out=$(ssh -o BatchMode=yes -o ConnectTimeout=30 "$HOST" "cd $REMOTE_ROOT && md5sum -c --quiet -" < "$manifest" 2>&1)
+	rc=$?
+	if [ "$rc" -gt 1 ]; then
+		printf '%s\n' "$out" >&2
+		return 2
+	fi
+	printf '%s\n' "$out" | sed -n 's/^\(.*\): FAILED.*$/\1/p' | sort -u
 }
 
-diverged=$(drift)
+diverged=$(drift) || { echo 'Сверка с продом не удалась (ssh/md5sum): прод не проверен.'; exit 2; }
 
 if [ -z "$diverged" ]; then
 	echo "OK: прод совпадает с локальным кастомом ($(wc -l < "$manifest") файлов)."
@@ -62,7 +72,7 @@ while IFS= read -r f; do
 	fi
 done <<< "$diverged"
 
-left=$(drift)
+left=$(drift) || { echo 'Повторная сверка не удалась (ssh/md5sum): прод не проверен.'; exit 2; }
 if [ "$fail" = 0 ] && [ -z "$left" ]; then
 	# Корень отвечает 200 (дневник на корне) или 301 (дневник переехал на
 	# свой путь, см. спеку 0004) — живы оба варианта.
