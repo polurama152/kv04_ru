@@ -2355,8 +2355,15 @@
 	var lightboxStage = lightbox && lightbox.querySelector('.kv04-lightbox__stage');
 	var lastFocus = null;
 	var activeThumb = null;
+	// Просмотрщик — не страница, а наложенный узел, и «назад» о нём не знает:
+	// на телефоне кнопка уводила со страницы, а в установленном приложении это
+	// закрывало приложение целиком. Поэтому на время показа кладём в историю
+	// свою запись, и «назад» тратится на неё.
+	var lightboxHistory = false;
 
-	function closeLightbox() {
+	// fromHistory — закрыл сам браузер по «назад»: запись уже снята, и трогать
+	// историю второй раз нельзя, иначе уедем на страницу назад по-настоящему.
+	function closeLightbox(fromHistory) {
 		if (!lightbox || !lightbox.classList.contains('is-open')) return;
 		var video = lightboxStage.querySelector('video');
 		if (video) {
@@ -2375,6 +2382,13 @@
 		activeThumb = null;
 		if (lastFocus && lastFocus.focus) lastFocus.focus();
 		lastFocus = null;
+
+		if (lightboxHistory) {
+			lightboxHistory = false;
+			// history.back() пришлёт popstate, но просмотрщик уже закрыт, и
+			// обработчик ниже ничего не сделает.
+			if (!fromHistory) history.back();
+		}
 	}
 
 	function openLightbox(type, src, trigger) {
@@ -2424,8 +2438,25 @@
 		lightbox.classList.add('is-open');
 		lightbox.setAttribute('aria-hidden', 'false');
 		document.body.classList.add('kv04-lightbox-open');
+
+		if (!lightboxHistory) {
+			lightboxHistory = true;
+			// Без адреса: pushState с двумя доводами оставляет URL прежним, а
+			// он у дневника значащий — по нему считается область приложения.
+			try {
+				history.pushState({ kv04Lightbox: true }, '');
+			} catch (err) {
+				lightboxHistory = false;
+			}
+		}
 		lightbox.querySelector('.kv04-lightbox__close').focus();
 	}
+
+	window.addEventListener('popstate', function () {
+		if (lightbox && lightbox.classList.contains('is-open')) {
+			closeLightbox(true);
+		}
+	});
 
 	root.addEventListener('click', function (e) {
 		if (e.target.closest('[data-media-delete]')) return;
