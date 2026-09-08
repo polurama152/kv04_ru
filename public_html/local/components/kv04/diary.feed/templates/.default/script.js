@@ -16,6 +16,9 @@
 	// корневом узле ленты: без них этот файл был бы не JS, а PHP-шаблоном,
 	// и его нельзя было бы ни проверить, ни закэшировать отдельно.
 	var sessid = root.getAttribute('data-sessid') || '';
+	// Метка mtime файлов конвертера: без неё сервис-воркер один раз положит их
+	// в кэш и больше никогда не спросит сервер.
+	var pdfVersion = root.getAttribute('data-pdf-version') || '';
 	var composer = root.querySelector('[data-composer]');
 	var input = composer.querySelector('[data-input]');
 	var list = root.querySelector('[data-list]');
@@ -2483,7 +2486,8 @@
 	// заметку ложится только текст. Библиотека тяжёлая, поэтому грузится не
 	// вместе с лентой, а в момент, когда PDF действительно выбрали.
 
-	var PDF_ASSET = '/local/modules/kv04.diary/assets/pdf-markdown.js';
+	var PDF_ASSET = '/local/modules/kv04.diary/assets/pdf-markdown.js'
+		+ (pdfVersion ? '?v=' + encodeURIComponent(pdfVersion) : '');
 	// Выше этого объёма вставка перекрывает всё поле ввода, и молча делать это
 	// нельзя: пользователь выбирал файл, а не соглашался на простыню.
 	var PDF_CONFIRM_CHARS = 50000;
@@ -2624,10 +2628,13 @@
 	// ничего не добавлял в схему, и заметки, заведённые до появления кнопки,
 	// получают её наравне с новыми.
 
-	var MD_FRONT_MATTER = /^---\r?\n([\s\S]{0,600}?)\r?\n---(?:\r?\n|$)/;
-
 	function parsedPdfHead(text) {
-		var m = MD_FRONT_MATTER.exec(text);
+		// Регулярка литералом внутри функции, а не константой файла. Этот
+		// разбор зовут в том числе при первой отрисовке ленты, а она случается
+		// выше по файлу, чем присваивание здесь. Подъём поднимает объявление
+		// var, но не значение: константа оказалась бы undefined ровно там, где
+		// нужна, и лента падала бы вместе со всем, что настраивается ниже.
+		var m = /^---\r?\n([\s\S]{0,600}?)\r?\n---(?:\r?\n|$)/.exec(text);
 		if (!m) return null;
 		// Строку pages конвертер пишет всегда, остальные — по обстоятельствам.
 		// Без неё перед нами просто текст, начатый с трёх дефисов.
@@ -2730,12 +2737,22 @@
 		if (body) keepCaretVisible(body);
 	});
 
+	// Кнопка — украшение, а первый проход по заметкам идёт раньше, чем лента
+	// привязывает лайтбокс и наблюдателя за вставками. Исключение отсюда
+	// уносило бы их с собой, и картинки переставали открываться на весь экран
+	// из-за кнопки. Вызов hljs выше прикрыт ровно так же и ровно поэтому.
+	function safeSyncMdButton(note) {
+		try {
+			syncMdButton(note);
+		} catch (err) {}
+	}
+
 	function syncMdButtons(scope) {
 		var root = scope && scope.querySelectorAll ? scope : list;
 		// Перерисовать могли как всю ленту, так и одно тело заметки.
 		var own = root.closest ? root.closest('.kv04-note') : null;
-		if (own) syncMdButton(own);
-		root.querySelectorAll('.kv04-note').forEach(syncMdButton);
+		if (own) safeSyncMdButton(own);
+		root.querySelectorAll('.kv04-note').forEach(safeSyncMdButton);
 	}
 
 })();

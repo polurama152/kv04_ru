@@ -45,8 +45,32 @@ foreach ($kv04Books as $kv04Book)
 
 <div class="kv04-books__backdrop" data-books-backdrop></div>
 
+<?php
+/**
+ * Метка версии для файлов конвертера PDF. Их грузит скрипт, а не шаблон,
+ * поэтому mtime до них иначе не доходит — а сервис-воркер кэширует всё под
+ * /local/ навсегда и без разбора: новая версия файла обязана быть новым URL.
+ *
+ * Метка одна на все четыре файла — по самому свежему из них. Точнее было бы
+ * версионировать каждый своим mtime, но тогда после правки нашего разбора у
+ * посетителя остался бы прежний pdf.js, и пара разъехалась бы. Лишняя
+ * перезакачка библиотеки стоит дешевле, чем новый парсер поверх старого.
+ */
+$kv04PdfFiles = [
+	'/local/modules/kv04.diary/assets/pdf-markdown.js',
+	'/local/modules/kv04.diary/assets/pdfjs/pdfjs-loader.js',
+	'/local/modules/kv04.diary/assets/pdfjs/pdf.min.js',
+	'/local/modules/kv04.diary/assets/pdfjs/pdf.worker.min.js',
+];
+$kv04PdfVersion = 0;
+foreach ($kv04PdfFiles as $kv04PdfFile)
+{
+	$kv04PdfVersion = max($kv04PdfVersion, (int)@filemtime($_SERVER['DOCUMENT_ROOT'] . $kv04PdfFile));
+}
+?>
 <div class="kv04-feed" id="kv04-feed"
 	data-max-books="<?=(int)($arResult['MAX_BOOKS'] ?? 50)?>"
+	data-pdf-version="<?=$kv04PdfVersion?>"
 	data-sessid="<?=htmlspecialcharsbx($arResult['SESSID'])?>"
 	data-share-url="<?=htmlspecialcharsbx((string)($arResult['SHARE_URL'] ?? ''))?>">
 	<div class="kv04-feed__head">

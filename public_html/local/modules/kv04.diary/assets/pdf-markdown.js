@@ -17,6 +17,24 @@
 
 	var BASE = '/local/modules/kv04.diary/assets/pdfjs/';
 
+	// Свою метку версии берём из адреса, которым загрузили этот файл: шаблон
+	// уже проставил её там, и передавать второй раз незачем. Так библиотека и
+	// разбор всегда одного поколения — а без метки сервис-воркер закэширует
+	// их навсегда, и правки до вернувшегося посетителя не дойдут.
+	var VERSION = (function () {
+		var el = document.currentScript;
+		if (!el || !el.src) return '';
+		try {
+			return new URL(el.src, location.href).searchParams.get('v') || '';
+		} catch (err) {
+			return '';
+		}
+	})();
+
+	function versioned(path) {
+		return VERSION ? path + '?v=' + encodeURIComponent(VERSION) : path;
+	}
+
 	// --- Пороги ------------------------------------------------------------
 	//
 	// Ни одного числа в пикселях: всё либо в долях кегля (em), либо в долях
@@ -205,14 +223,23 @@
 
 			var el = document.createElement('script');
 			el.type = 'module';
-			el.src = BASE + 'pdfjs-loader.js';
+			el.src = versioned(BASE + 'pdfjs-loader.js');
 			el.onload = function () {
-				if (!window.pdfjsLib) {
+				// Шим догружает саму библиотеку динамическим import, поэтому к
+				// моменту load она ещё в пути — ждём его обещание, а не голый
+				// window.pdfjsLib.
+				var ready = window.kv04PdfjsReady;
+				if (!ready) {
 					reject(fail('lib-failed', 'Библиотека разбора PDF не загрузилась.'));
 					return;
 				}
-				window.pdfjsLib.GlobalWorkerOptions.workerSrc = BASE + 'pdf.worker.min.js';
-				resolve(window.pdfjsLib);
+				ready.then(function (lib) {
+					lib.GlobalWorkerOptions.workerSrc = versioned(BASE + 'pdf.worker.min.js');
+					resolve(lib);
+				}, function () {
+					libPromise = null;
+					reject(fail('lib-failed', 'Библиотека разбора PDF не загрузилась.'));
+				});
 			};
 			el.onerror = function () {
 				libPromise = null; // сеть могла моргнуть — дать повторить
