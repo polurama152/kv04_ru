@@ -89,7 +89,8 @@ Bitrix-сайт. Кастом только в `public_html/local/`, ядро `pu
   (cookie, сессия, метка пина), `bookservice`, `noteservice`
   (заметки, MEDIA, корзина), `shareservice`, `html` (sanitize, изоляция `<pre>`)
 - `include/render-items.php` — разметка заметок, общая для ленты и страницы по ссылке
-- `assets/` — тема, highlight.js 11.9.0 (свой, не cdnjs), PWA
+- `assets/` — тема, highlight.js 11.9.0 (свой, не cdnjs), PWA,
+  `pdf-markdown.js` + `pdfjs/` (свой pdf.js 6.3.289, грузится лениво)
 - `options.php`, `admin/menu.php` — настройки и раздел в админке
 
 Компоненты `public_html/local/components/kv04/`: `diary.pin` (вход и регистрация),
