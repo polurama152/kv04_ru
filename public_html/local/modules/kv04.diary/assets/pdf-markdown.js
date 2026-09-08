@@ -1485,11 +1485,12 @@
 		var sorted = para.items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; });
 		var lines = linesFromRaw(sorted);
 
-		var text = '', lineTexts = [], sizes = {}, i;
+		var text = '', lineTexts = [], geo = [], sizes = {}, i;
 		for (i = 0; i < lines.length; i++) {
 			var piece = stripPua(lines[i].text, ctx);
 			if (piece === '') continue;
 			lineTexts.push(piece);
+			geo.push({ x1: lines[i].x1, size: lines[i].size });
 			var key = lines[i].size.toFixed(1);
 			sizes[key] = (sizes[key] || 0) + piece.length;
 			if (text === '') { text = piece; continue; }
@@ -1522,6 +1523,7 @@
 			role: para.role,
 			text: text,
 			lines: lineTexts,
+			geo: geo,
 			size: size,
 			bold: !!(first && first.bold),
 			boldShare: chars ? boldChars / chars : 0,
@@ -1632,7 +1634,7 @@
 			} else if (b.type === 'table') {
 				pushFrags(frags, [tablePlain(b)]);
 			} else {
-				pushFrags(frags, b.lines && b.lines.length ? b.lines : [b.text]);
+				pushFrags(frags, b.lines && b.lines.length ? b.lines : [b.text], b.geo);
 			}
 		}
 
@@ -1641,8 +1643,11 @@
 		return { header: false, frags: frags, plain: plain.join(' ').replace(/\s+/g, ' ').trim(), colSpan: 1, rowSpan: 1 };
 	}
 
-	function pushFrags(frags, lines) {
-		for (var j = 0; j < lines.length; j++) frags.push({ text: lines[j], start: j === 0 });
+	function pushFrags(frags, lines, geo) {
+		for (var j = 0; j < lines.length; j++) {
+			var g = geo && geo[j];
+			frags.push({ text: lines[j], start: j === 0, x1: g ? g.x1 : undefined, size: g ? g.size : 0 });
+		}
 	}
 
 	function tablePlain(table) {
@@ -1969,12 +1974,23 @@
 	}
 
 	function finalizeTable(table, dict) {
-		var idCols = identifierColumns(table), matrix = [], r, c, filled = 0;
+		var idCols = identifierColumns(table), matrix = [], r, c, f, filled = 0;
+		// Правый край колонки — самая длинная её строка: токен, разорванный по
+		// ширине ячейки, упирается именно в него.
+		var colRight = [];
+		for (c = 0; c < table.columns; c++) {
+			var right = -Infinity;
+			for (r = 0; r < table.rows.length; r++) {
+				var frags = table.rows[r].cells[c].frags;
+				for (f = 0; f < frags.length; f++) { if (frags[f].x1 !== undefined && frags[f].x1 > right) right = frags[f].x1; }
+			}
+			colRight.push(right);
+		}
 		for (r = 0; r < table.rows.length; r++) {
 			var line = [];
 			for (c = 0; c < table.columns; c++) {
 				var cell = table.rows[r].cells[c];
-				var text = cellText(cell, idCols[c], dict);
+				var text = cellText(cell, idCols[c], dict, colRight[c]);
 				if (text !== '') filled++;
 				if (text !== '' && !cell.header) text = markIdentifiers(text, idCols[c], dict);
 				line.push(text);
@@ -2004,7 +2020,7 @@
 	// («Истина – аналог; Ложь – оригинал»), если предыдущий не закончился
 	// двоеточием или точкой; тогда просто продолжение. Строка внутри абзаца —
 	// перенос: слова через пробел, идентификаторы — без.
-	function cellText(cell, idMode, dict) {
+	function cellText(cell, idMode, dict, colRight) {
 		var text = '';
 		for (var i = 0; i < cell.frags.length; i++) {
 			var piece = cell.frags[i].text;
@@ -2016,14 +2032,41 @@
 				text += (CELL_SENTENCE_END.test(text) ? ' ' : '; ') + item;
 				continue;
 			}
-			text = glueLines(text, piece, idMode, dict);
+			text = glueLines(text, piece, idMode, dict, cell.frags[i - 1], colRight);
 		}
 		return text.replace(/\s+/g, ' ').trim();
 	}
 
-	function glueLines(a, b, idMode, dict) {
+	function glueLines(a, b, idMode, dict, prev, colRight) {
 		var glued = glueIdentifier(a, b, idMode, dict);
+		if (glued === null) glued = glueBroken(a, b, prev, colRight);
 		return glued !== null ? glued : joinTreeLines(a, b);
+	}
+
+	// Токен длиннее ячейки Word рвёт на любом знаке: «YYYY-MM-DDThh:m|m:ss»,
+	// «подтверждена/отм|енена». Словарь документа тут бессилен — целым такой
+	// токен не встречается ни разу. Признак — геометрический: строка упирается
+	// в правый край колонки (зазор меньше знака), тогда как обычный перенос
+	// оставляет зазор шириной в недошедшее слово. Чтобы не склеить обычный
+	// перенос, попавший в зазор случайно, хвост должен быть код-подобным
+	// латинским токеном с пунктуацией внутри, а голова — обрывком без гласных
+	// или с пунктуации; для косой черты допускается и русское слово, если
+	// алфавит по обе стороны разрыва один.
+	var BREAK_SLACK = 0.9;
+	var CODE_TAIL_RE = /^[A-Za-z0-9]+[-:_\/.][A-Za-z0-9:_\-\/.]*$/;
+	var CODE_HEAD_RE = /^(?:[-:_\/.][A-Za-z0-9:_\-\/.]*|[b-df-hj-np-tv-zB-DF-HJ-NP-TV-Z0-9:_\-\/.]{1,6})$/;
+	var SLASH_TAIL_RE = /\/[^\s\/]*[a-zа-яё]$/;
+
+	function glueBroken(a, b, prev, colRight) {
+		if (!prev || prev.x1 === undefined || !isFinite(colRight)) return null;
+		if (colRight - prev.x1 > BREAK_SLACK * (prev.size || 1)) return null;
+		var tail = /(\S+)$/.exec(a), head = /^(\S+)/.exec(b);
+		if (!tail || !head) return null;
+		if (CODE_TAIL_RE.test(tail[1]) && CODE_HEAD_RE.test(head[1])) return a + b;
+		// Смена алфавита на разрыве — граница слов, а не перенос: «min/max» + «размер».
+		if (SLASH_TAIL_RE.test(tail[1]) && /^[a-zа-яё]{2,}/.test(head[1])
+			&& /[а-яё]$/.test(tail[1]) === /^[а-яё]/.test(head[1])) return a + b;
+		return null;
 	}
 
 	// ErrorDescripti|on — не дефект PDF, а систематический перенос Word внутри
