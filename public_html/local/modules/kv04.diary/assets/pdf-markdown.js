@@ -145,7 +145,9 @@
 		code: true,
 		dropToc: true,
 		joinPages: true,
-		pageMarks: true,
+		// Отметки страниц выключены: для модели это шум каждые тридцать строк.
+		// Спека 0008 включала их намеренно — решение пересмотрено.
+		pageMarks: false,
 		frontMatter: true,
 		onProgress: null,
 		onPassword: null,
@@ -292,12 +294,24 @@
 	// Порядок items в потоке содержимого — это порядок отрисовки, а не чтения.
 	// Доверять ему нельзя никогда, геометрию собираем сами.
 
-	function itemsToRaw(pdfjsLib, items, styles, viewport) {
-		var raw = [], i;
+	function itemsToRaw(pdfjsLib, items, styles, viewport, fontBold) {
+		var raw = [], stack = [], i;
 
 		for (i = 0; i < items.length && i < MAX_ITEMS_PER_PAGE; i++) {
 			var it = items[i];
-			if (!it || typeof it.str !== 'string' || it.str === '') continue;
+			if (!it) continue;
+			// Маркеры размеченного содержимого: стек, чтобы фрагмент знал свой
+			// MCID. Begin без id тоже идёт в стек, иначе его end снял бы чужую
+			// запись; но владельцем фрагмента он не становится — вложенный /Span
+			// без MCID (язык, ActualText) принадлежит внешней последовательности.
+			// Так Chrome прячет ударение «Ива́н» и хвосты ссылок. Исключение —
+			// /Artifact: его содержимое дереву не принадлежит вовсе.
+			if (it.type === 'beginMarkedContentProps' || it.type === 'beginMarkedContent') {
+				stack.push({ id: it.id || null, artifact: it.tag === 'Artifact' });
+				continue;
+			}
+			if (it.type === 'endMarkedContent') { stack.pop(); continue; }
+			if (typeof it.str !== 'string' || it.str === '') continue;
 
 			var m = pdfjsLib.Util.transform(viewport.transform, it.transform);
 			// Кегль через матрицу, а не it.height: на повёрнутой странице height врёт.
@@ -311,12 +325,22 @@
 				w: it.width || it.str.length * size * 0.5,
 				size: size,
 				font: it.fontName,
-				mono: !!(style && style.fontFamily === 'monospace')
+				mono: !!(style && style.fontFamily === 'monospace'),
+				mc: markedOwner(stack),
+				bold: !!(fontBold && fontBold[it.fontName])
 			});
 		}
 
 		raw.sort(function (a, b) { return a.y - b.y || a.x - b.x; });
 		return raw;
+	}
+
+	function markedOwner(stack) {
+		for (var k = stack.length - 1; k >= 0; k--) {
+			if (stack[k].artifact) return null;
+			if (stack[k].id) return stack[k].id;
+		}
+		return null;
 	}
 
 	// Группировка по базовой линии. Якорь — самый широкий item строки, а не
@@ -556,16 +580,16 @@
 
 	// Готовые строки страницы: сначала решение о колонках, потом сборка строк
 	// внутри каждой. Порядок обратный — и текст перемешан.
-	function pageLines(pdfjsLib, items, styles, viewport, useColumns) {
-		var raw = itemsToRaw(pdfjsLib, items, styles, viewport);
-		if (!useColumns) return { lines: linesFromRaw(raw), columns: 1 };
+	function pageLines(pdfjsLib, items, styles, viewport, useColumns, fontBold) {
+		var raw = itemsToRaw(pdfjsLib, items, styles, viewport, fontBold);
+		if (!useColumns) return { lines: linesFromRaw(raw), columns: 1, raw: raw };
 
 		var pieces = splitColumns(raw, 0, viewport.width, 0);
 		var lines = [], i;
 		for (i = 0; i < pieces.length; i++) {
 			lines = lines.concat(linesFromRaw(pieces[i]));
 		}
-		return { lines: lines, columns: pieces.length };
+		return { lines: lines, columns: pieces.length, raw: raw };
 	}
 
 	// --- Колонтитулы и номера страниц --------------------------------------
@@ -679,9 +703,14 @@
 
 	var NUMBERED_RE = /^(\d{1,3}(?:\.\d{1,3}){0,3})\.?\s+\S/;
 
+	// Одно слово капсом — это POST, ID или UID, а не заголовок: капсом считаем
+	// строку хотя бы из двух слов по две буквы.
 	function looksUpper(text) {
+		var words = text.split(/\s+/).filter(function (w) {
+			return w.replace(/[^a-zA-Zа-яёА-ЯЁ]/g, '').length >= 2;
+		});
+		if (words.length < 2) return false;
 		var letters = text.replace(/[^a-zA-Zа-яёА-ЯЁ]/g, '');
-		if (letters.length < 4) return false;
 		return letters === letters.toUpperCase() && letters !== letters.toLowerCase();
 	}
 
@@ -751,7 +780,10 @@
 		var score = 0, level = 0;
 
 		var num = NUMBERED_RE.exec(line.text);
-		if (num) {
+		// Балл только за иерархическую нумерацию: одиночное «1.» перед строкой —
+		// это чаще пункт перечня, чем заголовок, и балл за него рождал ложные
+		// заголовки из нумерованных списков.
+		if (num && num[1].indexOf('.') !== -1) {
 			score += ctx.numberedConsistent ? 2 : 1;
 			level = Math.min(MAX_LEVELS, num[1].split('.').filter(Boolean).length);
 		}
@@ -948,21 +980,34 @@
 		return { columns: columns.length, rows: matrix };
 	}
 
+	// Таблица приходит либо из геометрии ({ columns, rows }: шапка — первая
+	// строка, другого знания нет), либо из дерева с headerRows. Ноль там значит,
+	// что шапки в документе нет — тогда строка шапки выводится пустой, а не
+	// выдумывается из первой строки данных.
 	function renderTable(table) {
-		var out = [], i, j;
-		for (i = 0; i < table.rows.length; i++) {
-			var cells = [];
-			for (j = 0; j < table.columns; j++) {
+		var headerRows = table.headerRows === undefined ? 1 : table.headerRows;
+		var out = [], sep = [], i, j;
+
+		function row(cells) {
+			var parts = [];
+			for (var c = 0; c < table.columns; c++) {
 				// Без экранирования вертикальной черты таблица просто не
 				// распарсится — это одно из двух мест, где экранирование нужно.
-				cells.push(String(table.rows[i][j] || '').replace(/\|/g, '\|'));
+				parts.push(String(cells[c] || '').replace(/\|/g, '\\|'));
 			}
-			out.push('| ' + cells.join(' | ') + ' |');
-			if (i === 0) {
-				var sep = [];
-				for (j = 0; j < table.columns; j++) sep.push('---');
-				out.push('| ' + sep.join(' | ') + ' |');
-			}
+			return '| ' + parts.join(' | ') + ' |';
+		}
+
+		for (j = 0; j < table.columns; j++) sep.push('---');
+		sep = '| ' + sep.join(' | ') + ' |';
+
+		if (headerRows === 0) {
+			out.push(row([]));
+			out.push(sep);
+		}
+		for (i = 0; i < table.rows.length; i++) {
+			out.push(row(table.rows[i]));
+			if (i === headerRows - 1) out.push(sep);
 		}
 		return out.join('\n');
 	}
@@ -1225,6 +1270,824 @@
 		return { type: 'para', text: text };
 	}
 
+	// --- Разбор по разметке ------------------------------------------------
+	//
+	// Размеченный PDF (/MarkInfo /Marked) сам называет свои абзацы, таблицы и
+	// ячейки: getStructTree() отдаёт дерево ролей, а фрагменты текста привязаны
+	// к его листьям идентификатором MCID — тот же `p12R_mc7` приходит и в
+	// beginMarkedContentProps из getTextContent, и в лист дерева. Восстанавливать
+	// по координатам то, что в файле записано словами, — вносить ошибки на ровном
+	// месте: именно так таблицы читались по колонкам, а хвосты многострочных
+	// ячеек отрывались. Поэтому на размеченной странице геометрический конвейер
+	// выключен целиком: ни колонок, ни сборки строк по базовой линии, ни поиска
+	// таблиц, ни склейки абзацев — блоки идут в порядке дерева.
+	//
+	// Решение «дерево или геометрия» принимается на весь документ по доле знаков,
+	// покрытых деревом: иначе внутри одного файла получилась бы смесь двух
+	// стилей. Страницы без дерева внутри размеченного документа падают на
+	// геометрию.
+
+	var TREE_MIN_COVERAGE = 0.6;
+	// Заголовок называет раздел. Строка, повторяющаяся дословно на каждом
+	// развороте («Метод вызова POST»), ничего не называет — это данные.
+	var TREE_REPEAT_MIN = 3;
+	// Текст вне дерева на размеченной странице — по спецификации артефакт
+	// (колонтитул, фон). Выбрасываем, но заметную долю отмечаем в warnings.
+	var TREE_UNTAGGED_WARN = 0.05;
+	// Сирота усыновляется соседом на той же или следующей строке: дальше
+	// 1.6 em начинается другой абзац.
+	var ORPHAN_MAX_DY = 1.6;
+	// Заголовок функции с описанием в одну фразу занимает до трёх строк.
+	var TREE_HEAD_MAX_WORDS = 24;
+	var TREE_HEAD_MAX_CHARS = 200;
+	var TREE_HEAD_MAX_LINES = 3;
+	var TOC_MIN_ITEMS = 3;
+
+	var ID_RE = /^[A-Za-z][A-Za-z0-9_.]*$/;
+	var ID_FRAG_RE = /^[A-Za-z0-9_.]+$/;
+	// \w в JS без флага u кириллицы не знает: Справочник.Склады нужен свой шаблон.
+	var CYR_DOTTED_RE = /^[А-ЯЁ][а-яё]+(?:\.[А-ЯЁ][а-яё]+)+$/;
+	var CYR_DOTTED_TOKEN_RE = /[А-ЯЁ][а-яё]+(?:\.[А-ЯЁ][а-яё]+)+/g;
+	var LATIN_TOKEN_RE = /[A-Za-z_][A-Za-z0-9_.]*/g;
+	// «Функция SearchNomenclature – основной поиск…»: имя становится заголовком,
+	// описание — строкой под ним. Шаблон вторичен к жирному шрифту: слово
+	// «Функция» не переносится ни на один другой документ, а жирный заголовок
+	// переносится; здесь он только нормализует имя.
+	var FUNC_RE = /^(?:Функция|Function|Метод|Method|Процедура|Procedure)\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:[-\u2010\u2013\u2014:]\s*)?(.*)$/;
+	var CELL_LIST_RE = /^[-\u2010\u2013\u2014\u2022\u25AA\u25CF\u00B7\uE000-\uF8FF]\s*/;
+	var CELL_SENTENCE_END = /[:.!?;]$/;
+	var HEAD_TAIL_PUNCT = /[.!?;:,]$/;
+	var CAPTION_TAIL_PUNCT = /[.!?;,]$/;
+	var BOLD_FONT_RE = /bold|black|heavy|semibold|demibold/i;
+
+	var HEADING_ROLES = { H1: 1, H2: 2, H3: 3, H4: 3, H5: 3, H6: 3, Title: 1 };
+	// Блочные роли открывают свой абзац. Всё остальное — Span, Link, Sect, Div,
+	// NonStruct и любая незнакомая роль — прозрачно: текст падает в ближайший
+	// открытый абзац, а если открытого нет, абзац заводится сам.
+	var BLOCK_ROLES = { P: 1, H: 1, Caption: 1, Note: 1, Formula: 1, Code: 1, BibEntry: 1, TOCI: 1, Index: 1, BlockQuote: 1, Figure: 1, LI: 1, LBody: 1 };
+
+	// Сироты — фрагменты вне дерева на размеченной странице. По спецификации
+	// это артефакты, но генераторы небрежны: Chrome печатает адрес ссылки в
+	// скобках вовсе без разметки, и хвост длинного URL уезжает на новую строку.
+	// Фрагмент сразу за размеченным — на той же строке через обычный пробел или
+	// на следующей, начинаясь левее её конца, — отдаём тому же элементу.
+	// Остальное (колонтитулы, фон) действительно артефакты. raw отсортирован по
+	// (y, x), поэтому «предыдущий» здесь и есть предыдущий в порядке чтения.
+	function adoptOrphans(raw, ids) {
+		var last = null;
+		for (var i = 0; i < raw.length; i++) {
+			var r = raw[i];
+			if (r.mc && ids[r.mc]) { last = r; continue; }
+			if (!last || !/\S/.test(r.str)) continue;
+			var em = Math.max(r.size, last.size) || 1;
+			var dy = r.y - last.y;
+			if (dy < -LINE_Y_TOL * em || dy > ORPHAN_MAX_DY * em) continue;
+			if (Math.abs(dy) <= LINE_Y_TOL * em) {
+				if (r.x < last.x || r.x - (last.x + last.w) > GAP_TAB * em) continue;
+			} else if (r.x >= last.x + last.w) {
+				continue;
+			}
+			r.mc = last.mc;
+			last = r;
+		}
+	}
+
+	function collectContentIds(node, ids) {
+		if (!node) return ids;
+		if (node.type === 'content') { ids[node.id] = true; return ids; }
+		var kids = node.children || [];
+		for (var i = 0; i < kids.length; i++) collectContentIds(kids[i], ids);
+		return ids;
+	}
+
+	// Жирность фрагмента getTextContent не отдаёт — только loadedName шрифта
+	// (g_d0_f2). Имя самого шрифта (BAAAAA+Arial-BoldMT) лежит в page.commonObjs,
+	// но попадает туда лишь после getOperatorList(): разбор текста шрифты на
+	// главный поток не шлёт. Список операторов запрашиваем только на страницах,
+	// где встретился ещё не виденный шрифт — в обычном документе это первые
+	// одна-две страницы; картинки при этом не декодируются (maxImageSize).
+	function ensureFonts(page, items, fontBold) {
+		if (!fontBold) return Promise.resolve();
+
+		var missing = [], seen = {}, i;
+		for (i = 0; i < items.length; i++) {
+			var name = items[i] && items[i].fontName;
+			if (typeof items[i].str !== 'string' || !name || seen[name] || fontBold[name] !== undefined) continue;
+			seen[name] = true;
+			missing.push(name);
+		}
+		if (!missing.length) return Promise.resolve();
+
+		function read() {
+			for (var j = 0; j < missing.length; j++) {
+				var id = missing[j], font = null;
+				try { font = page.commonObjs.has(id) ? page.commonObjs.get(id) : null; } catch (err) { font = null; }
+				if (font && typeof font.name === 'string') fontBold[id] = BOLD_FONT_RE.test(font.name);
+			}
+		}
+
+		read();
+		var left = missing.filter(function (id) { return fontBold[id] === undefined; });
+		if (!left.length) return Promise.resolve();
+
+		return page.getOperatorList().then(read, function () {}).then(function () {
+			// Шрифт без имени жирным не считаем: лучше пропустить заголовок,
+			// чем выдумать его.
+			for (var j = 0; j < left.length; j++) { if (fontBold[left[j]] === undefined) fontBold[left[j]] = false; }
+		});
+	}
+
+	// Обход дерева. state.para — открытый абзац, в который падают фрагменты;
+	// блочная роль закрывает его и открывает свой.
+
+	function newPara(role) {
+		return { role: role, items: [], alt: '', sect: 0 };
+	}
+
+	function walkNode(node, page, ctx, out, state, sect) {
+		if (!node) return;
+		if (node.type === 'content') {
+			var items = page.mc[node.id];
+			if (!items) return;
+			if (!state.para) state.para = newPara('P');
+			state.para.items.push.apply(state.para.items, items);
+			return;
+		}
+		if (node.type) return; // object, annotation — не текст
+
+		var role = node.role || '', kids = node.children || [], i;
+
+		if (role === 'Table') {
+			closePara(out, state, ctx);
+			// Подпись внутри таблицы — отдельный блок перед ней, а не строка.
+			for (i = 0; i < kids.length; i++) {
+				if ((kids[i].role || '') !== 'Caption') continue;
+				var cap = textOfNode(kids[i], page, ctx);
+				if (cap) out.push({ type: 'para', role: 'Caption', text: cap, lines: [cap], size: 0, bold: false, y: 0 });
+			}
+			var table = treeTable(node, page, ctx);
+			if (table) out.push(table);
+			return;
+		}
+		if (role === 'L') {
+			closePara(out, state, ctx);
+			var list = treeList(node, page, ctx, 0);
+			if (list) out.push(list);
+			return;
+		}
+		if (role === 'TOC' && ctx.dropToc) {
+			closePara(out, state, ctx);
+			return;
+		}
+		if (HEADING_ROLES[role] || BLOCK_ROLES[role]) {
+			closePara(out, state, ctx);
+			state.para = newPara(role);
+			state.para.sect = sect;
+			if (node.alt) state.para.alt = String(node.alt);
+			for (i = 0; i < kids.length; i++) walkNode(kids[i], page, ctx, out, state, sect);
+			closePara(out, state, ctx);
+			return;
+		}
+
+		var deeper = (role === 'Sect' || role === 'Art' || role === 'Part') ? sect + 1 : sect;
+		for (i = 0; i < kids.length; i++) walkNode(kids[i], page, ctx, out, state, deeper);
+	}
+
+	function closePara(out, state, ctx) {
+		var para = state.para;
+		state.para = null;
+		if (!para) return;
+		var block = paraBlock(para, ctx);
+		if (!block) return;
+
+		if (HEADING_ROLES[para.role] || para.role === 'H') {
+			ctx.treeHeadingRoles = true;
+			// Ненумерованный /H берёт уровень из вложенности разделов — так
+			// устроен PDF/UA: /Sect внутри /Sect, и /H в каждом.
+			block.type = 'heading';
+			block.level = HEADING_ROLES[para.role] || Math.min(MAX_LEVELS, Math.max(1, para.sect));
+		}
+		out.push(block);
+	}
+
+	// Строки абзаца дерева: перенос со знаком — dehyphenate, разорванный адрес
+	// — без пробела (URL с пробелом внутри для модели мусор), иначе пробел.
+	var URL_TAIL_RE = /https?:\/\/[^\s()]*$/;
+
+	function joinTreeLines(a, b) {
+		var glued = dehyphenate(a, b);
+		if (glued !== null) return glued;
+		if (URL_TAIL_RE.test(a) && /^[^\s(]/.test(b)) return a + b;
+		return a + ' ' + b;
+	}
+
+	function paraBlock(para, ctx) {
+		var sorted = para.items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; });
+		var lines = linesFromRaw(sorted);
+
+		var text = '', lineTexts = [], sizes = {}, i;
+		for (i = 0; i < lines.length; i++) {
+			var piece = stripPua(lines[i].text, ctx);
+			if (piece === '') continue;
+			lineTexts.push(piece);
+			var key = lines[i].size.toFixed(1);
+			sizes[key] = (sizes[key] || 0) + piece.length;
+			if (text === '') { text = piece; continue; }
+			text = joinTreeLines(text, piece);
+		}
+
+		if (text === '') {
+			// Рисунок без текста — хотя бы его alt, если автор его написал.
+			if (!para.alt) return null;
+			var alt = cleanText(para.alt).replace(/\s+/g, ' ').trim();
+			if (alt === '') return null;
+			return { type: 'para', role: para.role, text: alt, lines: [alt], size: 0, bold: false, y: 0 };
+		}
+
+		var first = null, chars = 0, boldChars = 0;
+		for (i = 0; i < sorted.length; i++) {
+			if (!/\S/.test(sorted[i].str)) continue;
+			if (!first) first = sorted[i];
+			chars += sorted[i].str.length;
+			if (sorted[i].bold) boldChars += sorted[i].str.length;
+		}
+
+		var size = 0, best = -1, k;
+		for (k in sizes) {
+			if (sizes.hasOwnProperty(k) && sizes[k] > best) { best = sizes[k]; size = parseFloat(k); }
+		}
+
+		return {
+			type: 'para',
+			role: para.role,
+			text: text,
+			lines: lineTexts,
+			size: size,
+			bold: !!(first && first.bold),
+			boldShare: chars ? boldChars / chars : 0,
+			y: lines.length ? lines[0].y : 0
+		};
+	}
+
+	function textOfNode(node, page, ctx) {
+		var out = [], state = { para: null }, parts = [];
+		walkNode(node, page, ctx, out, state, 0);
+		closePara(out, state, ctx);
+		for (var i = 0; i < out.length; i++) {
+			if (out[i].type === 'table') parts.push(tablePlain(out[i]));
+			else parts.push(out[i].text);
+		}
+		return parts.join(' ').replace(/\s+/g, ' ').trim();
+	}
+
+	// --- Таблицы дерева ---
+
+	function emptyCell() {
+		return { header: false, frags: [], plain: '', colSpan: 1, rowSpan: 1 };
+	}
+
+	function treeTable(node, page, ctx) {
+		var all = [], rows = [], i, k;
+		collectRows(node, page, ctx, all);
+		// Дерево страницы содержит и строки, чьё содержимое лежит на других
+		// страницах, и повторную шапку продолжения — её текст Word не размечает.
+		// На этой странице такие строки пусты, и в сетке им делать нечего: без
+		// них продолжение начинается с данных, и склейка через разрыв видит это.
+		for (i = 0; i < all.length; i++) {
+			var filled = false;
+			for (k = 0; k < all[i].cells.length; k++) { if (all[i].cells[k].frags.length) { filled = true; break; } }
+			if (filled) rows.push(all[i]);
+		}
+		if (!rows.length) return null;
+
+		// Раскладка по сетке: colSpan и rowSpan добираются пустыми ячейками,
+		// чтобы в каждой строке было столько же ячеек, сколько у шапки.
+		var grid = [], pending = {}, r, s, cs;
+		for (r = 0; r < rows.length; r++) {
+			var cells = rows[r].cells, line = [], col = 0;
+			for (k = 0; k < cells.length; k++) {
+				while (pending[r + ':' + col]) { line.push(emptyCell()); col++; }
+				line.push(cells[k]);
+				for (s = 1; s < cells[k].rowSpan; s++) {
+					for (cs = 0; cs < cells[k].colSpan; cs++) pending[(r + s) + ':' + (col + cs)] = true;
+				}
+				col++;
+				for (cs = 1; cs < cells[k].colSpan; cs++) { line.push(emptyCell()); col++; }
+			}
+			while (pending[r + ':' + col]) { line.push(emptyCell()); col++; }
+			grid.push({ header: rows[r].header, cells: line });
+		}
+
+		var columns = 0, ragged = false;
+		for (r = 0; r < grid.length; r++) columns = Math.max(columns, grid[r].cells.length);
+		for (r = 0; r < grid.length; r++) {
+			if (grid[r].cells.length !== columns) ragged = true;
+			while (grid[r].cells.length < columns) grid[r].cells.push(emptyCell());
+		}
+
+		var headerRows = 0;
+		while (headerRows < grid.length && grid[headerRows].header) headerRows++;
+
+		return { type: 'table', rows: grid, columns: columns, headerRows: headerRows, ragged: ragged, page: page.number };
+	}
+
+	function collectRows(node, page, ctx, rows) {
+		var kids = node.children || [];
+		for (var i = 0; i < kids.length; i++) {
+			var role = kids[i].role || '';
+			if (role === 'TR') rows.push(rowFromTr(kids[i], page, ctx));
+			else if (role === 'THead' || role === 'TBody' || role === 'TFoot') collectRows(kids[i], page, ctx, rows);
+		}
+	}
+
+	function rowFromTr(tr, page, ctx) {
+		var kids = tr.children || [], cells = [], allHeader = true;
+		for (var i = 0; i < kids.length; i++) {
+			var role = kids[i].role || '';
+			if (role !== 'TD' && role !== 'TH') continue;
+			var cell = cellFromNode(kids[i], page, ctx);
+			cell.header = role === 'TH';
+			cell.colSpan = Math.max(1, kids[i].colSpan | 0);
+			cell.rowSpan = Math.max(1, kids[i].rowSpan | 0);
+			if (!cell.header) allHeader = false;
+			cells.push(cell);
+		}
+		return { header: allHeader && cells.length > 0, cells: cells };
+	}
+
+	// Ячейка хранит не текст, а фрагменты — строки её абзацев с отметкой начала
+	// абзаца. Склеивать их можно только зная, идентификаторная ли это колонка, а
+	// это известно лишь после сборки всей таблицы.
+	function cellFromNode(node, page, ctx) {
+		var out = [], state = { para: null }, kids = node.children || [], i, j;
+		for (i = 0; i < kids.length; i++) walkNode(kids[i], page, ctx, out, state, 0);
+		closePara(out, state, ctx);
+
+		var frags = [];
+		for (i = 0; i < out.length; i++) {
+			var b = out[i];
+			if (i > 0 && b.type === 'para' && out[i - 1].type === 'para' && out[i - 1].text === b.text) continue;
+			if (b.type === 'list') {
+				for (j = 0; j < b.items.length; j++) pushFrags(frags, [b.items[j].text]);
+			} else if (b.type === 'table') {
+				pushFrags(frags, [tablePlain(b)]);
+			} else {
+				pushFrags(frags, b.lines && b.lines.length ? b.lines : [b.text]);
+			}
+		}
+
+		var plain = [];
+		for (i = 0; i < frags.length; i++) plain.push(frags[i].text);
+		return { header: false, frags: frags, plain: plain.join(' ').replace(/\s+/g, ' ').trim(), colSpan: 1, rowSpan: 1 };
+	}
+
+	function pushFrags(frags, lines) {
+		for (var j = 0; j < lines.length; j++) frags.push({ text: lines[j], start: j === 0 });
+	}
+
+	function tablePlain(table) {
+		var parts = [];
+		for (var r = 0; r < table.rows.length; r++) {
+			for (var c = 0; c < table.rows[r].cells.length; c++) {
+				if (table.rows[r].cells[c].plain) parts.push(table.rows[r].cells[c].plain);
+			}
+		}
+		return parts.join(' ');
+	}
+
+	function headerKey(table) {
+		if (!table.headerRows) return '';
+		var rows = [];
+		for (var r = 0; r < table.headerRows; r++) {
+			var cells = [];
+			for (var c = 0; c < table.rows[r].cells.length; c++) cells.push(normalizeTitle(table.rows[r].cells[c].plain));
+			rows.push(cells.join('|'));
+		}
+		return rows.join('||');
+	}
+
+	// --- Списки дерева ---
+
+	function treeList(node, page, ctx, depth) {
+		var items = [], kids = node.children || [], i;
+		for (i = 0; i < kids.length; i++) {
+			if ((kids[i].role || '') === 'LI') listItem(kids[i], page, ctx, depth, items);
+		}
+		if (!items.length) return null;
+
+		var lines = [];
+		for (i = 0; i < items.length; i++) {
+			var it = items[i];
+			var marker = it.ordered ? it.label + '.' : '-';
+			var indent = new Array(it.depth * (it.ordered ? 3 : 2) + 1).join(' ');
+			lines.push(indent + marker + ' ' + it.text);
+		}
+		return { type: 'list', text: lines.join('\n'), items: items };
+	}
+
+	function listItem(li, page, ctx, depth, items) {
+		var kids = li.children || [], label = '', out = [], state = { para: null }, i;
+		for (i = 0; i < kids.length; i++) {
+			var role = kids[i].role || '';
+			if (role === 'Lbl') { label = textOfNode(kids[i], page, ctx); continue; }
+			if (role === 'L') {
+				closePara(out, state, ctx);
+				var sub = treeList(kids[i], page, ctx, depth + 1);
+				if (sub) out.push(sub);
+				continue;
+			}
+			walkNode(kids[i], page, ctx, out, state, 0);
+		}
+		closePara(out, state, ctx);
+
+		var text = '', subs = [];
+		for (i = 0; i < out.length; i++) {
+			var b = out[i];
+			if (b.type === 'list') { subs.push(b); continue; }
+			var piece = b.type === 'table' ? tablePlain(b) : b.text;
+			if (piece === '') continue;
+			text = text === '' ? piece : text + ' ' + piece;
+		}
+
+		var num = /^\(?(\d{1,3}|[a-zа-я])[.)]?$/i.exec(label);
+		if (text !== '') items.push({ depth: depth, text: text, ordered: !!num, label: num ? num[1] : '' });
+		for (i = 0; i < subs.length; i++) items.push.apply(items, subs[i].items);
+	}
+
+	// --- Страница по дереву ---
+
+	function treeBlocks(page, ctx, repeats) {
+		var out = [], state = { para: null }, kept = [], i, r, c;
+		walkNode(page.tree, page, ctx, out, state, 0);
+		closePara(out, state, ctx);
+
+		for (i = 0; i < out.length; i++) {
+			var b = out[i];
+			// Колонтитулы здесь размечены как обычный текст — повтор по страницам
+			// ловим тем же способом, что и в геометрии.
+			if (b.type === 'para' && isFurniture({ text: b.text, y: b.y }, page, repeats)) continue;
+			// Таблица в одну колонку — это вёрстка (текстовый блок в рамке), а
+			// не данные: отдаём абзацами.
+			if (b.type === 'table' && b.columns === 1) {
+				for (r = 0; r < b.rows.length; r++) {
+					for (c = 0; c < b.rows[r].cells.length; c++) {
+						var cell = b.rows[r].cells[c];
+						if (!cell.frags.length) continue;
+						var text = cellText(cell, false, null);
+						if (text) kept.push({ type: 'para', role: 'P', text: text, lines: [text], size: 0, bold: false, y: 0 });
+					}
+				}
+				continue;
+			}
+			// alt рисунка нередко дословно повторяет подпись под ним.
+			if (b.type === 'para' && kept.length && kept[kept.length - 1].type === 'para' && kept[kept.length - 1].text === b.text) continue;
+			kept.push(b);
+		}
+		return kept;
+	}
+
+	// --- Склейка таблицы через разрыв страницы ---
+	//
+	// Только при совпадении трёх признаков: последний блок предыдущей страницы —
+	// таблица, между ними нет другого содержимого (колонтитулы уже сняты), и
+	// первая строка продолжения либо без шапки, либо с той же шапкой дословно.
+	// Шапка продолжения выбрасывается; общей дедупликации шапок нет: таблица без
+	// шапки для модели — пять безымянных колонок.
+	function joinTablesAcrossPages(pages, warn) {
+		var tail = null;
+		for (var i = 0; i < pages.length; i++) {
+			var blocks = pages[i].blocks;
+			if (blocks.length && tail && tail.type === 'table' && blocks[0].type === 'table' && tableContinues(tail, blocks[0])) {
+				var head = blocks[0];
+				var body = head.rows.slice(head.headerRows);
+				// Строка, разорванная разрывом страницы: её хвост приходит строкой с
+				// пустой первой ячейкой — дописываем в последнюю строку, а не заводим
+				// новую.
+				if (body.length && tail.rows.length > tail.headerRows && !body[0].cells[0].frags.length) {
+					var last = tail.rows[tail.rows.length - 1];
+					for (var c = 0; c < last.cells.length && c < body[0].cells.length; c++) {
+						last.cells[c].frags = last.cells[c].frags.concat(body[0].cells[c].frags);
+						last.cells[c].plain = (last.cells[c].plain + ' ' + body[0].cells[c].plain).trim();
+					}
+					body = body.slice(1);
+				}
+				tail.rows = tail.rows.concat(body);
+				if (head.ragged) tail.ragged = true;
+				blocks.shift();
+				warn('table-joined', pages[i].number);
+			}
+			if (blocks.length) tail = blocks[blocks.length - 1];
+		}
+	}
+
+	function tableContinues(prev, next) {
+		if (prev.columns !== next.columns) return false;
+		if (next.headerRows === 0) return true;
+		var key = headerKey(prev);
+		return key !== '' && key === headerKey(next);
+	}
+
+	// --- Семантика: заголовки, подписи, идентификаторы ---
+
+	function forEachBlock(pages, fn) {
+		for (var i = 0; i < pages.length; i++) {
+			if (!pages[i].fromTree) continue;
+			for (var j = 0; j < pages[i].blocks.length; j++) fn(pages[i].blocks[j], pages[i], j);
+		}
+	}
+
+	function headingShapedTree(b) {
+		if (b.type !== 'para') return false;
+		if (b.lines.length > TREE_HEAD_MAX_LINES) return false;
+		if (b.text.length > TREE_HEAD_MAX_CHARS) return false;
+		if (b.text.split(/\s+/).length > TREE_HEAD_MAX_WORDS) return false;
+		return !HEAD_TAIL_PUNCT.test(b.text);
+	}
+
+	function resolveTree(pages, ctx, warn) {
+		var hasBold = false, counts = {}, cands = [];
+
+		forEachBlock(pages, function (b) { if (b.type === 'para' && b.bold) hasBold = true; });
+
+		// Кандидат — короткий одиночный абзац с жирным началом. Когда документ
+		// сам размечает заголовки ролями /H, жирный абзац — просто выделение.
+		// Когда жирности нет ни у одного абзаца (шрифты без имён) — работает
+		// запасной шаблон.
+		function candidate(b) {
+			if (!headingShapedTree(b) || b.role === 'Caption') return false;
+			if (ctx.outline && outlineLevelOf(b.text, ctx.outline)) return true;
+			if (ctx.treeHeadingRoles) return false;
+			return hasBold ? b.bold : FUNC_RE.test(b.text);
+		}
+
+		forEachBlock(pages, function (b) {
+			if (!candidate(b)) return;
+			var key = normalizeTitle(b.text);
+			counts[key] = (counts[key] || 0) + 1;
+			cands.push(b);
+		});
+
+		function repeated(b) {
+			return counts[normalizeTitle(b.text)] >= TREE_REPEAT_MIN;
+		}
+
+		// Уровень — по кеглю, внутри одного кегля капс выше строчных: «СЕРВИСЫ
+		// ПОИСКА» набран на полпункта крупнее функций, и один кегль их не
+		// различает, а регистр — различает.
+		var sizes = [], i, j;
+		for (i = 0; i < cands.length; i++) {
+			if (repeated(cands[i])) continue;
+			if (sizes.indexOf(cands[i].size) === -1) sizes.push(cands[i].size);
+		}
+		sizes.sort(function (a, b) { return b - a; });
+		var clusters = [];
+		for (i = 0; i < sizes.length; i++) {
+			if (clusters.length && clusters[clusters.length - 1] - sizes[i] < SIZE_MERGE) continue;
+			clusters.push(sizes[i]);
+		}
+		function rankOf(b) {
+			var cluster = 0;
+			for (var c = 0; c < clusters.length; c++) { if (b.size >= clusters[c] - SIZE_MERGE) { cluster = c; break; } }
+			return cluster * 2 + (looksUpper(b.text) ? 0 : 1);
+		}
+		var ranks = [];
+		for (i = 0; i < cands.length; i++) {
+			if (repeated(cands[i])) continue;
+			var rank = rankOf(cands[i]);
+			if (ranks.indexOf(rank) === -1) ranks.push(rank);
+		}
+		ranks.sort(function (a, b) { return a - b; });
+
+		var dict = {};
+		for (i = 0; i < cands.length; i++) {
+			var b = cands[i];
+			if (repeated(b)) continue;
+			var level = ctx.outline ? outlineLevelOf(b.text, ctx.outline) : 0;
+			if (!level) level = Math.min(MAX_LEVELS, ranks.indexOf(rankOf(b)) + 1);
+			b.type = 'heading';
+			b.level = level;
+			var m = FUNC_RE.exec(b.text);
+			if (m) {
+				b.text = m[1];
+				b.fn = true;
+				dict[m[1]] = true;
+				var desc = m[2].replace(/^[-\u2010\u2013\u2014:\s]+/, '').trim();
+				if (desc) b.desc = desc;
+			}
+		}
+
+		// Описание функции — строкой под заголовком.
+		for (i = 0; i < pages.length; i++) {
+			if (!pages[i].fromTree) continue;
+			var rebuilt = [];
+			for (j = 0; j < pages[i].blocks.length; j++) {
+				var blk = pages[i].blocks[j];
+				rebuilt.push(blk);
+				if (blk.desc) rebuilt.push({ type: 'para', role: 'P', text: blk.desc, lines: [blk.desc], size: 0, bold: false, y: 0, nocap: true });
+			}
+			pages[i].blocks = rebuilt;
+		}
+
+		// Именованные таблицы: короткий абзац непосредственно перед таблицей —
+		// её подпись, уровнем ниже последнего заголовка. Правило позиционное;
+		// повтор его не отменяет: «Входные параметры» и должно повторяться у
+		// каждой функции. Роль /Caption — то же самое, но сказанное автором.
+		var flat = [];
+		forEachBlock(pages, function (b) { flat.push(b); });
+		var lastLevel = 0;
+		for (i = 0; i < flat.length; i++) {
+			var cur = flat[i], next = i + 1 < flat.length ? flat[i + 1] : null;
+			if (cur.type === 'heading') { lastLevel = cur.level; continue; }
+			if (cur.type !== 'para' || cur.nocap) continue;
+			var isCaption = cur.role === 'Caption' && next && next.type === 'table';
+			if (!isCaption) {
+				isCaption = next && next.type === 'table' && headingShapedTree(cur) && !CAPTION_TAIL_PUNCT.test(cur.text);
+			}
+			if (!isCaption) continue;
+			cur.type = 'heading';
+			cur.level = Math.min(MAX_LEVELS, lastLevel + 1);
+			cur.text = cur.text.replace(/:$/, '').trim();
+			cur.caption = true;
+			lastLevel = cur.level;
+		}
+
+		// Словарь идентификаторов: имена функций плюс значения идентификаторных
+		// колонок. Первый проход определяет колонки без словаря; второй склеивает
+		// переносы и ставит бэктики уже со словарём.
+		forEachBlock(pages, function (b) {
+			if (b.type !== 'table') return;
+			var idCols = identifierColumns(b);
+			for (var r = b.headerRows; r < b.rows.length; r++) {
+				for (var c = 0; c < b.columns; c++) {
+					if (!idCols[c]) continue;
+					var cell = b.rows[r].cells[c];
+					if (cell.frags.length === 1 && (ID_RE.test(cell.plain) || CYR_DOTTED_RE.test(cell.plain))) dict[cell.plain] = true;
+				}
+			}
+		});
+
+		var toc = [];
+		forEachBlock(pages, function (b) {
+			if (b.type === 'table') finalizeTable(b, dict);
+			if (b.type === 'heading' && b.level === 2 && !b.caption) toc.push(b.text);
+		});
+		if (toc.length >= TOC_MIN_ITEMS) ctx.toc = toc;
+
+		// Пустые блоки — наша ошибка, а не свойство документа: отмечаем и убираем.
+		for (i = 0; i < pages.length; i++) {
+			if (!pages[i].fromTree) continue;
+			var alive = [];
+			for (j = 0; j < pages[i].blocks.length; j++) {
+				var x = pages[i].blocks[j];
+				var empty = (x.type === 'table' && !x.text) || ((x.type === 'para' || x.type === 'heading') && !x.text);
+				if (empty) { warn('empty-block', pages[i].number); continue; }
+				alive.push(x);
+			}
+			pages[i].blocks = alive;
+		}
+	}
+
+	// Колонка идентификаторная, если большинство её значений — идентификаторы.
+	// Считаем по склейке фрагментов без пробела: перенесённый идентификатор
+	// голосует за колонку целым словом.
+	function identifierColumns(table) {
+		var cols = [], r, c;
+		for (c = 0; c < table.columns; c++) {
+			var hits = 0, total = 0;
+			for (r = table.headerRows; r < table.rows.length; r++) {
+				var cell = table.rows[r].cells[c];
+				if (!cell.frags.length) continue;
+				total++;
+				var concat = [];
+				for (var f = 0; f < cell.frags.length; f++) concat.push(cell.frags[f].text);
+				var whole = concat.join('');
+				if (ID_RE.test(whole) || CYR_DOTTED_RE.test(whole)) hits++;
+			}
+			cols.push(total > 0 && hits / total > 0.5);
+		}
+		return cols;
+	}
+
+	function finalizeTable(table, dict) {
+		var idCols = identifierColumns(table), matrix = [], r, c, filled = 0;
+		for (r = 0; r < table.rows.length; r++) {
+			var line = [];
+			for (c = 0; c < table.columns; c++) {
+				var cell = table.rows[r].cells[c];
+				var text = cellText(cell, idCols[c], dict);
+				if (text !== '') filled++;
+				if (text !== '' && !cell.header) text = markIdentifiers(text, idCols[c], dict);
+				line.push(text);
+			}
+			matrix.push(line);
+		}
+
+		// Markdown знает одну строку шапки: несколько сливаем по колонкам.
+		var headerRows = table.headerRows;
+		if (headerRows > 1) {
+			var merged = [];
+			for (c = 0; c < table.columns; c++) {
+				var parts = [];
+				for (r = 0; r < headerRows; r++) { if (matrix[r][c]) parts.push(matrix[r][c]); }
+				merged.push(parts.join(' '));
+			}
+			matrix = [merged].concat(matrix.slice(headerRows));
+			headerRows = 1;
+		}
+
+		table.matrix = matrix;
+		table.idCols = idCols;
+		table.text = filled > 0 ? renderTable({ columns: table.columns, rows: matrix, headerRows: headerRows }) : '';
+	}
+
+	// Текст ячейки из фрагментов. Новый абзац внутри ячейки — элемент перечня
+	// («Истина – аналог; Ложь – оригинал»), если предыдущий не закончился
+	// двоеточием или точкой; тогда просто продолжение. Строка внутри абзаца —
+	// перенос: слова через пробел, идентификаторы — без.
+	function cellText(cell, idMode, dict) {
+		var text = '';
+		for (var i = 0; i < cell.frags.length; i++) {
+			var piece = cell.frags[i].text;
+			if (text === '') { text = piece; continue; }
+			if (cell.frags[i].start) {
+				var glued = glueIdentifier(text, piece, idMode, dict);
+				if (glued !== null) { text = glued; continue; }
+				var item = piece.replace(CELL_LIST_RE, '');
+				text += (CELL_SENTENCE_END.test(text) ? ' ' : '; ') + item;
+				continue;
+			}
+			text = glueLines(text, piece, idMode, dict);
+		}
+		return text.replace(/\s+/g, ' ').trim();
+	}
+
+	function glueLines(a, b, idMode, dict) {
+		var glued = glueIdentifier(a, b, idMode, dict);
+		return glued !== null ? glued : joinTreeLines(a, b);
+	}
+
+	// ErrorDescripti|on — не дефект PDF, а систематический перенос Word внутри
+	// узкой ячейки. Склеиваем без пробела, когда целое — идентификатор в
+	// идентификаторной колонке или токен, встреченный в документе целиком; но
+	// не тогда, когда обрывок сам по себе известный токен — «Login» и
+	// «Password» строками одной ячейки склеивать нельзя.
+	function glueIdentifier(a, b, idMode, dict) {
+		var tail = /(\S+)$/.exec(a), head = /^(\S+)/.exec(b);
+		if (!tail || !head) return null;
+		if (!ID_FRAG_RE.test(tail[1]) || !ID_FRAG_RE.test(head[1])) return null;
+		if (dict && dict[tail[1]]) return null;
+		var whole = (tail[1] + head[1]).replace(/[.,;:)]+$/, '');
+		if (dict && dict[whole]) return a + b;
+		if (idMode && ID_RE.test(a + b)) return a + b;
+		return null;
+	}
+
+	// Бэктики: значение идентификаторной колонки — целиком, в остальных — токены
+	// из словаря. Для модели это разница между словом «Name» и полем `Name`.
+	function markIdentifiers(text, idCol, dict) {
+		if (idCol && (ID_RE.test(text) || CYR_DOTTED_RE.test(text))) return '`' + text + '`';
+		if (!dict || text.indexOf('`') !== -1) return text;
+		text = text.replace(LATIN_TOKEN_RE, function (tok) {
+			var core = tok.replace(/\.+$/, '');
+			return dict[core] ? '`' + core + '`' + tok.slice(core.length) : tok;
+		});
+		return text.replace(CYR_DOTTED_TOKEN_RE, function (tok) {
+			return dict[tok] ? '`' + tok + '`' : tok;
+		});
+	}
+
+	// --- Контроль качества вывода ---
+	//
+	// Без markdown-парсера: сотня килобайт поверх 1.8 МБ ради проверки текста,
+	// который мы сами только что породили. Все проверки прямые.
+	function checkOutput(markdown, pages, warn) {
+		if (/[\f\u0000-\u0008\u000B\u000E-\u001F]/.test(markdown)) warn('md-invariant', 0);
+		if (/\n{3,}/.test(markdown)) warn('md-invariant', 0);
+		if (/^[ \t]+$/m.test(markdown)) warn('md-invariant', 0);
+
+		var lastLevel = 0, i, j, r, c;
+		for (i = 0; i < pages.length; i++) {
+			for (j = 0; j < pages[i].blocks.length; j++) {
+				var b = pages[i].blocks[j];
+				if (b.type === 'heading') {
+					if (!b.text) warn('empty-block', pages[i].number);
+					if (b.level > lastLevel + 1) warn('heading-skip', pages[i].number);
+					lastLevel = b.level;
+				}
+				if (b.type === 'table' && b.matrix) {
+					if (!b.matrix.length) warn('empty-block', pages[i].number);
+					for (r = 0; r < b.matrix.length; r++) {
+						if (b.matrix[r].length !== b.columns) warn('table-ragged', pages[i].number);
+						for (c = 0; c < b.matrix[r].length; c++) {
+							if (/\s{2}/.test(b.matrix[r][c])) warn('md-invariant', pages[i].number);
+						}
+					}
+					if (b.ragged) warn('table-ragged', pages[i].number);
+				}
+			}
+		}
+	}
+
 	// --- Сборка страницы ---------------------------------------------------
 
 	function pageBlocks(page, ctx, repeats) {
@@ -1313,6 +2176,14 @@
 			out.push(head.join('\n'));
 		}
 
+		// Оглавление — список функций без ссылок-якорей: `[X](#x)` стоит вдвое
+		// дороже голого `X`, а модели якорь не нужен.
+		if (state.toc && state.toc.length) {
+			var toc = [];
+			for (i = 0; i < state.toc.length; i++) toc.push('- ' + state.toc[i]);
+			out.push(toc.join('\n'));
+		}
+
 		for (i = 0; i < pages.length; i++) {
 			var page = pages[i];
 			if (!page.blocks.length) continue;
@@ -1336,7 +2207,7 @@
 
 	function convert(file, userOptions) {
 		var options = extend(DEFAULTS, userOptions);
-		var state = { pages: 0, truncated: false, chars: 0 };
+		var state = { pages: 0, truncated: false, chars: 0, rawChars: 0, treeChars: 0, toc: null };
 		var warnings = [], warned = {};
 
 		function warn(code, page) {
@@ -1355,6 +2226,9 @@
 		var started = Date.now();
 		var pdfjsLib = null, pdf = null, loadingTask = null;
 		var pages = [], meta = { file: file && file.name ? file.name : '', title: '', author: '', pagesTotal: 0 };
+		// loadedName шрифта → жирный ли он; общий на документ, шрифты pdf.js
+		// кэширует между страницами.
+		var fontBold = {};
 
 		function report(phase, page, total) {
 			if (!options.onProgress) return;
@@ -1380,7 +2254,10 @@
 				// разборе шрифтов.
 				isEvalSupported: false,
 				disableFontFace: true,
-				useSystemFonts: false
+				useSystemFonts: false,
+				// Список операторов запрашивается только ради имён шрифтов
+				// (ensureFonts); картинки при этом декодировать незачем.
+				maxImageSize: 1
 			});
 
 			if (options.onPassword) {
@@ -1442,7 +2319,10 @@
 				colLeft: 0,
 				colRight: 0,
 				contentWidth: 1,
-				ragged: false
+				ragged: false,
+				dropToc: false,
+				treeHeadingRoles: false,
+				toc: null
 			};
 
 			if (outline) {
@@ -1452,17 +2332,36 @@
 			}
 
 			var dropToc = options.dropToc && !!outline;
+			ctx.dropToc = dropToc;
+			// Дерево или геометрия — на весь документ. Порог по знакам, а не по
+			// страницам: титул без разметки не должен решать за сорок страниц с
+			// ней. Страница без дерева внутри размеченного документа — геометрия.
+			var treeMode = state.treeChars > 0 && state.treeChars >= TREE_MIN_COVERAGE * state.rawChars;
 			for (var i = 0; i < pages.length; i++) {
-				ctx.page = pages[i].number;
-				if (dropToc && isTocPage(pages[i])) { pages[i].blocks = []; continue; }
-				pages[i].blocks = pageBlocks(pages[i], ctx, repeats);
+				var pg = pages[i];
+				ctx.page = pg.number;
+				if (treeMode && pg.tree && pg.treeChars >= TREE_MIN_COVERAGE * pg.rawChars) {
+					pg.fromTree = true;
+					pg.blocks = treeBlocks(pg, ctx, repeats);
+					if (pg.rawChars - pg.treeChars > TREE_UNTAGGED_WARN * pg.rawChars) warn('untagged-dropped', pg.number);
+					continue;
+				}
+				if (pg.columns > 1) warn('columns-guessed', pg.number);
+				if (dropToc && isTocPage(pg)) { pg.blocks = []; continue; }
+				pg.blocks = pageBlocks(pg, ctx, repeats);
 			}
 
+			if (treeMode) {
+				joinTablesAcrossPages(pages, warn);
+				resolveTree(pages, ctx, warn);
+				state.toc = ctx.toc;
+			}
 			if (options.joinPages) joinAcrossPages(pages);
 			if (ctx.puaSeen) warn('pua-dropped', 0);
 			if (state.truncated) warn('truncated', 0);
 
 			var markdown = assemble(pages, meta, options, state);
+			checkOutput(markdown, pages, warn);
 			if (markdown.length > options.maxChars) {
 				markdown = markdown.slice(0, options.maxChars);
 				state.truncated = true;
@@ -1505,45 +2404,82 @@
 
 				return pdf.getPage(n).then(function (page) {
 					var viewport = page.getViewport({ scale: 1 });
-					return page.getTextContent().then(function (content) {
-						var built = pageLines(pdfjsLib, content.items, content.styles, viewport, options.columns);
-						var lines = built.lines;
-						var garbage = 0, chars = 0, i;
-						for (i = 0; i < lines.length; i++) {
-							chars += lines[i].text.length;
-							garbage += lines[i].garbage * lines[i].text.length;
-						}
-
-						// Сломанная кодировка отравляет контекст модели сильнее,
-						// чем пропущенная страница.
-						if (chars > 0 && garbage / chars > GARBAGE_PAGE) {
-							warn('unmapped-font', n);
-							lines = [];
-						}
-						if (!lines.length) warn('no-text-page', n);
-						if (content.items.length > MAX_ITEMS_PER_PAGE) warn('slow', n);
-						if (built.columns > 1) warn('columns-guessed', n);
-
-						state.chars += chars;
-						state.pages = n;
-						pages.push({
-							number: n,
-							lines: lines,
-							width: viewport.width,
-							height: viewport.height,
-							blocks: []
+					// includeMarkedContent режет фрагменты по границам MCID и вставляет
+					// маркеры begin/end: геометрии они не мешают (у них нет str), а
+					// дереву без них не связать текст с ролями.
+					return Promise.all([
+						page.getTextContent({ includeMarkedContent: true }),
+						page.getStructTree().catch(function () { return null; })
+					]).then(function (both) {
+						var content = both[0];
+						var tree = both[1] && both[1].children && both[1].children.length ? both[1] : null;
+						// Имена шрифтов нужны только дереву: на них держится правило
+						// «жирный абзац — заголовок».
+						return ensureFonts(page, content.items, tree ? fontBold : null).then(function () {
+							return readPage(page, viewport, content, tree, n);
 						});
-
-						page.cleanup();
-
-						// Скан читать до конца незачем: пятистраничного зонда
-						// хватает, чтобы понять, что текстового слоя нет.
-						if (n >= NO_TEXT_PROBE && state.chars < NO_TEXT_CHARS_PER_PAGE * n) throw noTextError();
-
-						return n % YIELD_EVERY === 0 ? yieldToUi() : null;
 					});
 				});
 			};
+		}
+
+		function readPage(page, viewport, content, tree, n) {
+			var built = pageLines(pdfjsLib, content.items, content.styles, viewport, options.columns, fontBold);
+			var lines = built.lines;
+			var garbage = 0, chars = 0, i;
+			for (i = 0; i < lines.length; i++) {
+				chars += lines[i].text.length;
+				garbage += lines[i].garbage * lines[i].text.length;
+			}
+
+			// Сломанная кодировка отравляет контекст модели сильнее, чем
+			// пропущенная страница.
+			if (chars > 0 && garbage / chars > GARBAGE_PAGE) {
+				warn('unmapped-font', n);
+				lines = [];
+				tree = null;
+			}
+			if (!lines.length) warn('no-text-page', n);
+			if (content.items.length > MAX_ITEMS_PER_PAGE) warn('slow', n);
+
+			// Карта MCID → фрагменты и доля знаков, покрытых деревом.
+			var ids = tree ? collectContentIds(tree, {}) : null;
+			if (ids) adoptOrphans(built.raw, ids);
+			var mc = {}, rawChars = 0, treeChars = 0;
+			for (i = 0; i < built.raw.length; i++) {
+				var r = built.raw[i];
+				rawChars += r.str.length;
+				if (ids && r.mc && ids[r.mc]) {
+					treeChars += r.str.length;
+					(mc[r.mc] = mc[r.mc] || []).push(r);
+				}
+			}
+
+			state.chars += chars;
+			state.rawChars += rawChars;
+			state.treeChars += treeChars;
+			state.pages = n;
+			pages.push({
+				number: n,
+				lines: lines,
+				columns: built.columns,
+				width: viewport.width,
+				height: viewport.height,
+				blocks: [],
+				tree: tree,
+				mc: mc,
+				rawChars: rawChars,
+				treeChars: treeChars,
+				fromTree: false
+			});
+
+			page.cleanup();
+
+			// Скан читать до конца незачем: пятистраничного зонда хватает, чтобы
+			// понять, что текстового слоя нет.
+			if (n >= NO_TEXT_PROBE && state.chars < NO_TEXT_CHARS_PER_PAGE * n) throw noTextError();
+
+			return n % YIELD_EVERY === 0 ? yieldToUi() : null;
 		}
 	}
 
