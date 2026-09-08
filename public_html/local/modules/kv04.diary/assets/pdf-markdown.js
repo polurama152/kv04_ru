@@ -1893,6 +1893,22 @@
 			pages[i].blocks = rebuilt;
 		}
 
+		// Словарь идентификаторов: имена функций плюс значения идентификаторных
+		// колонок. Первый проход определяет колонки без словаря; второй склеивает
+		// переносы и ставит бэктики уже со словарём. Подписям таблиц словарь
+		// нужен раньше — поэтому он здесь.
+		forEachBlock(pages, function (b) {
+			if (b.type !== 'table') return;
+			var idCols = identifierColumns(b);
+			for (var r = b.headerRows; r < b.rows.length; r++) {
+				for (var c = 0; c < b.columns; c++) {
+					if (!idCols[c]) continue;
+					var cell = b.rows[r].cells[c];
+					if (cell.frags.length === 1 && (ID_RE.test(cell.plain) || CYR_DOTTED_RE.test(cell.plain))) dict[cell.plain] = true;
+				}
+			}
+		});
+
 		// Именованные таблицы: короткий абзац непосредственно перед таблицей —
 		// её подпись, уровнем ниже последнего заголовка. Правило позиционное;
 		// повтор его не отменяет: «Входные параметры» и должно повторяться у
@@ -1912,24 +1928,11 @@
 			cur.type = 'heading';
 			cur.level = Math.min(MAX_LEVELS, lastLevel + 1);
 			cur.text = cur.text.replace(/:$/, '').trim();
+			var named = captionIdentifier(cur.text, dict);
+			if (named) cur.text = named;
 			cur.caption = true;
 			lastLevel = cur.level;
 		}
-
-		// Словарь идентификаторов: имена функций плюс значения идентификаторных
-		// колонок. Первый проход определяет колонки без словаря; второй склеивает
-		// переносы и ставит бэктики уже со словарём.
-		forEachBlock(pages, function (b) {
-			if (b.type !== 'table') return;
-			var idCols = identifierColumns(b);
-			for (var r = b.headerRows; r < b.rows.length; r++) {
-				for (var c = 0; c < b.columns; c++) {
-					if (!idCols[c]) continue;
-					var cell = b.rows[r].cells[c];
-					if (cell.frags.length === 1 && (ID_RE.test(cell.plain) || CYR_DOTTED_RE.test(cell.plain))) dict[cell.plain] = true;
-				}
-			}
-		});
 
 		var toc = [];
 		forEachBlock(pages, function (b) {
@@ -1950,6 +1953,31 @@
 			}
 			pages[i].blocks = alive;
 		}
+	}
+
+	// Подпись таблицы — её имя, если в ней ровно один идентификатор. Тогда
+	// заголовок дословно совпадает с полем родительской таблицы, и связь «поле
+	// → его состав» для модели становится сравнением строк, а не догадкой по
+	// словам «Структура», «Таблица», «Возвращается»: их не трогаем, это словарь
+	// одного документа. Кандидат — токен из словаря идентификаторов документа
+	// либо, в кириллической подписи, латинский токен вида идентификатора
+	// (смешанный регистр, подчёркивание, цифры — но не капс вроде POST):
+	// OutputStructure строкой ни одной таблицы не значится, а именем быть
+	// должен. Ноль кандидатов или несколько — подпись остаётся как есть, без
+	// догадок.
+	var CAPTION_SPLIT_RE = /[\s,;:!?()\[\]\u00AB\u00BB"']+/;
+
+	function captionIdentifier(text, dict) {
+		var tokens = text.split(CAPTION_SPLIT_RE), found = [], i;
+		var cyrillic = /[\u0430-\u044F\u0451\u0410-\u042F\u0401]/.test(text);
+		for (i = 0; i < tokens.length; i++) {
+			var t = tokens[i].replace(/\.+$/, '');
+			if (t === '') continue;
+			var shaped = cyrillic && (CYR_DOTTED_RE.test(t)
+				|| (ID_RE.test(t) && /[a-z]/.test(t) && /[A-Z0-9_.]/.test(t)));
+			if ((dict[t] || shaped) && found.indexOf(t) === -1) found.push(t);
+		}
+		return found.length === 1 ? found[0] : null;
 	}
 
 	// Колонка идентификаторная, если большинство её значений — идентификаторы.
