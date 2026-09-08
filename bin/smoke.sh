@@ -128,6 +128,18 @@ fi
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$SITE/local/modules/kv04.diary/assets/diary-theme.css")
 [ "$code" = 200 ] && ok "тема дневника отдаётся" || bad "diary-theme.css: код $code"
 
+# 6б. Конвертер PDF и его библиотека. Проверяем и тип содержимого: pdf.js
+# грузится как модуль, а модуль с типом text/plain браузер молча отвергает —
+# именно поэтому файлы лежат с расширением .js, а не .mjs.
+for asset in assets/pdf-markdown.js assets/pdfjs/pdfjs-loader.js assets/pdfjs/pdf.min.js assets/pdfjs/pdf.worker.min.js; do
+	head=$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' "$SITE/local/modules/kv04.diary/$asset")
+	case "$head" in
+		200*javascript*) ok "$asset отдаётся" ;;
+		200*) bad "$asset: тип содержимого ${head#200 } вместо javascript" ;;
+		*) bad "$asset: код ${head%% *}" ;;
+	esac
+done
+
 # 7. Синтаксис ключевых файлов — боевым PHP на сервере.
 if ssh -o BatchMode=yes "$HOST" "cd $REMOTE_ROOT/public_html && $PHP_BIN -l index.php && $PHP_BIN -l local/modules/kv04.diary/include.php && $PHP_BIN -l local/modules/kv04.diary/lib/path.php && $PHP_BIN -l local/modules/kv04.diary/pub/index.php && $PHP_BIN -l local/modules/kv04.diary/options.php && $PHP_BIN -l local/components/kv04/diary.feed/class.php" > /dev/null 2>&1; then
 	ok "php -l ключевых файлов ($PHP_BIN)"

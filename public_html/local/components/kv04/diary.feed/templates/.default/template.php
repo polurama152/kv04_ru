@@ -187,10 +187,22 @@ foreach ($kv04Books as $kv04Book)
 				Видео
 				<input type="file" accept="video/*" capture="environment" hidden>
 			</label>
+			<?php
+			/**
+			 * Своё поле, не media[]: PDF разбирается в браузере и на сервер не
+			 * уезжает вовсе. Попади он в media[], загрузка молча отвергла бы
+			 * его по расширению, а место на диске всё равно было бы потрачено.
+			 */
+			?>
+			<label class="kv04-btn kv04-btn--muted kv04-btn--sm" data-pdf title="Разобрать PDF в текст — файл остаётся на устройстве">
+				PDF
+				<input type="file" accept="application/pdf,.pdf" hidden>
+			</label>
 			<button type="submit" class="kv04-btn kv04-btn--primary kv04-btn--sm" title="Готово (Ctrl+Enter)">Готово</button>
 		</div>
 		<div class="kv04-composer__preview" data-file-preview hidden></div>
 		<p class="kv04-composer__status" data-shot-status hidden></p>
+		<p class="kv04-composer__status" data-pdf-status hidden></p>
 		<p class="kv04-feed__error" data-error hidden></p>
 	</form>
 

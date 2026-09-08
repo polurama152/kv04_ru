@@ -83,7 +83,8 @@
 }
 
 [data-shot].is-busy,
-[data-clip].is-busy {
+[data-clip].is-busy,
+[data-pdf].is-busy {
 	opacity: 0.55;
 	pointer-events: none;
 }

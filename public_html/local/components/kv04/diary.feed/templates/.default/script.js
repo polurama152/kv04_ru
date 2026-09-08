@@ -144,9 +144,13 @@
 						out += NEWLINE;
 					}
 					// <div><br></div> — это одна пустая строка, а не две.
+					// Перенос выше закрывает предыдущую строку, этот — и есть
+					// сама пустая. Без него абзацы слипались бы: пустая строка
+					// не доезжала до базы, хотя в редакторе была.
 					var onlyBreak = child.childNodes.length === 1
 						&& child.firstChild.nodeName === 'BR';
-					if (!onlyBreak) walk(child);
+					if (onlyBreak) out += NEWLINE;
+					else walk(child);
 					continue;
 				}
 
@@ -1480,11 +1484,15 @@
 	var confirmActive = false;
 	var confirmFinish = null;
 
-	function showSaveConfirm() {
+	// Вопрос параметром: диалог тот же самый, спрашивают им о разном. Заводить
+	// второй ради одной строки текста незачем.
+	function showSaveConfirm(question) {
 		if (!confirmEl || confirmActive) {
 			return Promise.resolve(false);
 		}
 		return new Promise(function (resolve) {
+			var title = confirmEl.querySelector('.kv04-confirm__title');
+			if (title) title.textContent = question || 'Сохранить изменения?';
 			confirmActive = true;
 			confirmFinish = resolve;
 			confirmEl.hidden = false;
@@ -2454,4 +2462,144 @@
 			}
 		}
 	});
+
+	// --- PDF → Markdown ----------------------------------------------------
+	//
+	// Разбор идёт целиком здесь, в браузере: файл не уезжает на сервер, а в
+	// заметку ложится только текст. Библиотека тяжёлая, поэтому грузится не
+	// вместе с лентой, а в момент, когда PDF действительно выбрали.
+
+	var PDF_ASSET = '/local/modules/kv04.diary/assets/pdf-markdown.js';
+	// Выше этого объёма вставка перекрывает всё поле ввода, и молча делать это
+	// нельзя: пользователь выбирал файл, а не соглашался на простыню.
+	var PDF_CONFIRM_CHARS = 50000;
+
+	var pdfLabel = composer.querySelector('[data-pdf]');
+	var pdfInput = pdfLabel ? pdfLabel.querySelector('input[type=file]') : null;
+	var pdfStatus = composer.querySelector('[data-pdf-status]');
+	var pdfAssetPromise = null;
+
+	var PDF_WARNINGS = {
+		'table-skipped': 'таблицы, в которых колонки не сошлись, легли обычным текстом',
+		'unmapped-font': 'страницы со сломанной кодировкой пропущены',
+		'pua-dropped': 'служебные символы шрифтов выброшены',
+		'columns-guessed': 'текст в колонках прочитан по разметке страницы',
+		'no-text-page': 'часть страниц без текстового слоя',
+		'truncated': 'документ обрезан',
+		'order-suspect': 'порядок разделов мог сбиться',
+		'slow': 'очень плотные страницы'
+	};
+
+	function setPdfStatus(text, isError) {
+		if (!pdfStatus) return;
+		pdfStatus.textContent = text || '';
+		pdfStatus.classList.toggle('is-error', !!isError);
+		pdfStatus.hidden = !text;
+	}
+
+	// Сам конвертер тоже грузим лениво: без него лента весит столько же,
+	// сколько весила.
+	function ensurePdfAsset() {
+		if (window.KV04PdfMarkdown) return Promise.resolve(window.KV04PdfMarkdown);
+		if (pdfAssetPromise) return pdfAssetPromise;
+
+		pdfAssetPromise = new Promise(function (resolve, reject) {
+			var el = document.createElement('script');
+			el.src = PDF_ASSET;
+			el.onload = function () {
+				if (window.KV04PdfMarkdown) resolve(window.KV04PdfMarkdown);
+				else reject(new Error('Разбор PDF не загрузился.'));
+			};
+			el.onerror = function () {
+				pdfAssetPromise = null;
+				reject(new Error('Не удалось загрузить разбор PDF.'));
+			};
+			document.head.appendChild(el);
+		});
+		return pdfAssetPromise;
+	}
+
+	function describePdfWarnings(warnings) {
+		var seen = {}, out = [], i;
+		for (i = 0; i < warnings.length; i++) {
+			var phrase = PDF_WARNINGS[warnings[i].code];
+			if (!phrase || seen[phrase]) continue;
+			seen[phrase] = true;
+			out.push(phrase);
+		}
+		return out;
+	}
+
+	// Вставляем как обычный текст, тем же путём, что и вставка из буфера:
+	// execCommand кладёт запись в историю, и Ctrl+Z её снимает. Присваивание
+	// в узел историю бы обнулило, и отменить вставку было бы нечем.
+	function insertIntoComposer(text) {
+		input.focus();
+		if (!currentRange(input)) {
+			// Фокус ушёл на поле выбора файла, каретки в редакторе нет —
+			// ставим её в конец, иначе вставлять будет некуда.
+			var end = document.createRange();
+			end.selectNodeContents(input);
+			end.collapse(false);
+			var sel = window.getSelection();
+			sel.removeAllRanges();
+			sel.addRange(end);
+		}
+		document.execCommand('insertText', false, text);
+	}
+
+	function pdfDoneText(result) {
+		var parts = ['Готово: ' + result.pages + ' стр., ' + result.markdown.length + ' знаков'];
+		var notes = describePdfWarnings(result.warnings);
+		if (notes.length) parts.push(notes.join('; '));
+		return parts.join('. ') + '.';
+	}
+
+	function runPdf(file) {
+		setBusy(pdfLabel, true);
+		setPdfStatus('Открываю PDF…');
+
+		ensurePdfAsset().then(function (lib) {
+			return lib.convert(file, {
+				onProgress: function (p) {
+					if (p.phase === 'text' && p.pages) {
+						setPdfStatus('Разбираю страницу ' + p.page + ' из ' + p.pages + '…');
+					} else if (p.phase === 'lib') {
+						setPdfStatus('Загружаю разбор PDF…');
+					} else {
+						setPdfStatus('Открываю PDF…');
+					}
+				}
+			});
+		}).then(function (result) {
+			setBusy(pdfLabel, false);
+			if (result.markdown === '') {
+				setPdfStatus('В этом PDF не нашлось текста.', true);
+				return null;
+			}
+			if (result.markdown.length <= PDF_CONFIRM_CHARS) return result;
+
+			setPdfStatus('');
+			return showSaveConfirm('Вставить ' + result.markdown.length + ' знаков в заметку?')
+				.then(function (ok) { return ok ? result : null; });
+		}).then(function (result) {
+			if (!result) return;
+			insertIntoComposer(result.markdown);
+			setPdfStatus(pdfDoneText(result));
+		}).catch(function (err) {
+			setBusy(pdfLabel, false);
+			setPdfStatus(err && err.message ? err.message : 'Не удалось разобрать PDF.', true);
+		});
+	}
+
+	if (pdfInput) {
+		pdfInput.addEventListener('change', function () {
+			var file = pdfInput.files && pdfInput.files[0];
+			// Сбрасываем сразу: без этого повторный выбор того же файла не
+			// даёт события change, и кнопка выглядит сломанной.
+			pdfInput.value = '';
+			if (file) runPdf(file);
+		});
+	}
+
 })();
