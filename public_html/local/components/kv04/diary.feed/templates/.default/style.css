@@ -877,6 +877,33 @@ body.kv04-lightbox-open {
 	max-width: 100%;
 }
 
+/* Разобранный PDF — это тысячи строк. Без потолка одна такая заметка
+   растягивает ленту на десяток экранов, и до соседних записей уже не
+   долистать. Потолок тот же, что у списка дневников. */
+.kv04-note--md .kv04-note__body {
+	max-height: min(60vh, 520px);
+	overflow-y: auto;
+	/* Дочитали до конца — лента под заметкой не должна поехать следом. */
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+	scrollbar-color: var(--kv04-text-muted) transparent;
+}
+
+/* Полоса прокрутки — единственный признак, что текст продолжается ниже, а
+   системная в macOS и iOS прячется до первого касания. Рисуем свою. */
+.kv04-note--md .kv04-note__body::-webkit-scrollbar {
+	width: 6px;
+}
+
+.kv04-note--md .kv04-note__body::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.kv04-note--md .kv04-note__body::-webkit-scrollbar-thumb {
+	background: var(--kv04-text-muted);
+	border-radius: 3px;
+}
+
 @media (min-width: 768px) {
 	.kv04-media-grid--1 {
 		width: min(100%, 380px);

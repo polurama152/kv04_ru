@@ -2681,8 +2681,12 @@
 		if (!parsedPdfHead(noteText(note))) {
 			// Шапку могли удалить блоком или правкой — тогда и кнопке не место.
 			if (button) button.parentNode.removeChild(button);
+			note.classList.remove('kv04-note--md');
 			return;
 		}
+		// Класс несёт потолок высоты: разобранный документ иначе растягивает
+		// ленту так, что соседних заметок не найти.
+		note.classList.add('kv04-note--md');
 		if (button) return;
 
 		button = document.createElement('button');
@@ -2693,6 +2697,38 @@
 		button.textContent = 'Скачать md';
 		note.insertBefore(button, note.firstChild);
 	}
+
+	// Каретка в заметке с потолком. Браузеры обычно доводят её до видимой части
+	// сами, но проверить это на всех, где живёт дневник, нечем, а промах даёт
+	// слепой набор: текст уходит под нижний край и его не видно. Дешевле
+	// довести самим — когда браузер уже справился, эта проверка ничего не
+	// делает.
+	function keepCaretVisible(body) {
+		var sel = window.getSelection();
+		if (!sel || !sel.rangeCount) return;
+
+		var range = sel.getRangeAt(0);
+		if (!body.contains(range.commonAncestorContainer)) return;
+
+		var caret = range.getBoundingClientRect();
+		// Схлопнутая каретка в пустой строке даёт нулевой прямоугольник:
+		// мерить нечего, и сдвиг был бы наугад.
+		if (!caret.height && !caret.top && !caret.bottom) return;
+
+		var box = body.getBoundingClientRect();
+		if (caret.bottom > box.bottom) {
+			body.scrollTop += caret.bottom - box.bottom + 8;
+		} else if (caret.top < box.top) {
+			body.scrollTop -= box.top - caret.top + 8;
+		}
+	}
+
+	document.addEventListener('input', function (e) {
+		var target = e.target;
+		if (!target || !target.closest) return;
+		var body = target.closest('.kv04-note--md .kv04-note__body');
+		if (body) keepCaretVisible(body);
+	});
 
 	function syncMdButtons(scope) {
 		var root = scope && scope.querySelectorAll ? scope : list;
