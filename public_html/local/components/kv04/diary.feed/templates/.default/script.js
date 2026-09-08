@@ -2355,15 +2355,8 @@
 	var lightboxStage = lightbox && lightbox.querySelector('.kv04-lightbox__stage');
 	var lastFocus = null;
 	var activeThumb = null;
-	// Просмотрщик — не страница, а наложенный узел, и «назад» о нём не знает:
-	// на телефоне кнопка уводила со страницы, а в установленном приложении это
-	// закрывало приложение целиком. Поэтому на время показа кладём в историю
-	// свою запись, и «назад» тратится на неё.
-	var lightboxHistory = false;
 
-	// fromHistory — закрыл сам браузер по «назад»: запись уже снята, и трогать
-	// историю второй раз нельзя, иначе уедем на страницу назад по-настоящему.
-	function closeLightbox(fromHistory) {
+	function closeLightbox() {
 		if (!lightbox || !lightbox.classList.contains('is-open')) return;
 		var video = lightboxStage.querySelector('video');
 		if (video) {
@@ -2382,13 +2375,6 @@
 		activeThumb = null;
 		if (lastFocus && lastFocus.focus) lastFocus.focus();
 		lastFocus = null;
-
-		if (lightboxHistory) {
-			lightboxHistory = false;
-			// history.back() пришлёт popstate, но просмотрщик уже закрыт, и
-			// обработчик ниже ничего не сделает.
-			if (!fromHistory) history.back();
-		}
 	}
 
 	function openLightbox(type, src, trigger) {
@@ -2438,25 +2424,8 @@
 		lightbox.classList.add('is-open');
 		lightbox.setAttribute('aria-hidden', 'false');
 		document.body.classList.add('kv04-lightbox-open');
-
-		if (!lightboxHistory) {
-			lightboxHistory = true;
-			// Без адреса: pushState с двумя доводами оставляет URL прежним, а
-			// он у дневника значащий — по нему считается область приложения.
-			try {
-				history.pushState({ kv04Lightbox: true }, '');
-			} catch (err) {
-				lightboxHistory = false;
-			}
-		}
 		lightbox.querySelector('.kv04-lightbox__close').focus();
 	}
-
-	window.addEventListener('popstate', function () {
-		if (lightbox && lightbox.classList.contains('is-open')) {
-			closeLightbox(true);
-		}
-	});
 
 	root.addEventListener('click', function (e) {
 		if (e.target.closest('[data-media-delete]')) return;
@@ -2784,6 +2753,168 @@
 		var own = root.closest ? root.closest('.kv04-note') : null;
 		if (own) safeSyncMdButton(own);
 		root.querySelectorAll('.kv04-note').forEach(safeSyncMdButton);
+	}
+
+
+	// --- «Назад» закрывает верхний слой, а не приложение --------------------
+	//
+	// Просмотрщик, панели и диалог — наложенные узлы, а не страницы, и история
+	// о них не знает. На телефоне «назад» уводил со страницы, а в установленном
+	// приложении это и есть выход: открыл фото или настройки, захотел вернуться
+	// в ленту — вышел совсем.
+	//
+	// На каждый открытый слой кладём в историю запись, и «назад» тратится на
+	// неё. Слои ложатся стопкой — поверх настроек диалог, поверх ленты
+	// картинка, — поэтому закрываем верхний, а не первый попавшийся.
+	//
+	// Слушаем сами узлы, а не места открытия: панели прячут и показывают
+	// простым hidden из десятка обработчиков, и обойти их все значит однажды
+	// один пропустить. Наблюдатель ловит любой путь, включая те, что появятся
+	// позже.
+
+	var OVERLAYS = [
+		{
+			name: 'lightbox',
+			node: lightbox,
+			isOpen: function () { return !!lightbox && lightbox.classList.contains('is-open'); },
+			close: function () { closeLightbox(); }
+		},
+		{
+			name: 'confirm',
+			node: confirmEl,
+			isOpen: function () { return !!confirmEl && !confirmEl.hidden; },
+			// «Назад» — это отказ, а не согласие.
+			close: function () { closeSaveConfirm(false); }
+		},
+		{
+			name: 'settings',
+			node: settingsBox,
+			isOpen: function () { return !!settingsBox && !settingsBox.hidden; },
+			close: function () { settingsBox.hidden = true; }
+		},
+		{
+			name: 'share',
+			node: shareBox,
+			isOpen: function () { return !!shareBox && !shareBox.hidden; },
+			close: function () { shareBox.hidden = true; }
+		},
+		{
+			name: 'trash',
+			node: trashBox,
+			isOpen: function () { return !!trashBox && !trashBox.hidden; },
+			close: function () { trashBox.hidden = true; }
+		},
+		{
+			// Список дневников наложен только на узком экране: на широком он
+			// стоит сбоку всегда, и этого класса на нём не бывает.
+			name: 'books',
+			node: workspace,
+			isOpen: function () { return !!workspace && workspace.classList.contains('is-books-open'); },
+			close: function () { closeBooks(); }
+		}
+	];
+
+	var overlayStack = [];
+	// Сколько записей в истории мы завели сами. Назад отматываем только их:
+	// иначе слой, открытый ещё до нашего учёта, при закрытии увёл бы со
+	// страницы — ровно та беда, которую мы и чиним.
+	var overlayEntries = 0;
+
+	function overlayByName(name) {
+		for (var i = 0; i < OVERLAYS.length; i++) {
+			if (OVERLAYS[i].name === name) return OVERLAYS[i];
+		}
+		return null;
+	}
+
+	function openOverlayNames() {
+		var out = [], i;
+		for (i = 0; i < OVERLAYS.length; i++) {
+			try {
+				if (OVERLAYS[i].isOpen()) out.push(OVERLAYS[i].name);
+			} catch (err) {}
+		}
+		return out;
+	}
+
+	function syncOverlayHistory() {
+		var now = openOverlayNames();
+		var next = [], added = 0, removed = 0, i;
+
+		// Порядок открытия сохраняем: верхний слой — тот, что открыли позже.
+		for (i = 0; i < overlayStack.length; i++) {
+			if (now.indexOf(overlayStack[i]) !== -1) next.push(overlayStack[i]);
+			else removed++;
+		}
+		for (i = 0; i < now.length; i++) {
+			if (next.indexOf(now[i]) === -1) { next.push(now[i]); added++; }
+		}
+		overlayStack = next;
+
+		// Замена одного слоя другим (настройки закрывают список дневников)
+		// историю не трогает: записей столько же, сколько слоёв.
+		if (added > removed) {
+			for (i = 0; i < added - removed; i++) {
+				try {
+					// Без адреса: pushState с двумя доводами оставляет URL
+					// прежним, а он у дневника значащий — по нему считается
+					// область установленного приложения.
+					history.pushState({ kv04Overlay: true }, '');
+					overlayEntries++;
+				} catch (err) {}
+			}
+			return;
+		}
+
+		if (removed > added) {
+			var back = Math.min(removed - added, overlayEntries);
+			if (back > 0) {
+				overlayEntries -= back;
+				history.go(-back);
+			}
+		}
+	}
+
+	window.addEventListener('popstate', function () {
+		var open = openOverlayNames();
+		// Ничего не открыто — «назад» работает как обычно, выход из приложения
+		// мы не запираем.
+		if (!open.length) return;
+
+		if (overlayEntries > 0) overlayEntries--;
+
+		var top = null, i;
+		for (i = overlayStack.length - 1; i >= 0; i--) {
+			if (open.indexOf(overlayStack[i]) !== -1) { top = overlayStack[i]; break; }
+		}
+		if (!top) top = open[open.length - 1];
+
+		// Запись браузер уже снял, историю трогать нельзя. Убираем слой из
+		// учёта до закрытия — тогда наблюдатель увидит, что счёт сошёлся, и
+		// второй раз назад не отмотает.
+		var kept = [];
+		for (i = 0; i < overlayStack.length; i++) {
+			if (overlayStack[i] !== top) kept.push(overlayStack[i]);
+		}
+		overlayStack = kept;
+
+		var overlay = overlayByName(top);
+		if (overlay) {
+			try {
+				overlay.close();
+			} catch (err) {}
+		}
+	});
+
+	if (window.MutationObserver) {
+		var overlayObserver = new MutationObserver(syncOverlayHistory);
+		for (var oi = 0; oi < OVERLAYS.length; oi++) {
+			if (!OVERLAYS[oi].node) continue;
+			overlayObserver.observe(OVERLAYS[oi].node, {
+				attributes: true,
+				attributeFilter: ['hidden', 'class']
+			});
+		}
 	}
 
 })();
