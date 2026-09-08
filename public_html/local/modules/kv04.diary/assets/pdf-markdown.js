@@ -1934,11 +1934,27 @@
 			lastLevel = cur.level;
 		}
 
-		var toc = [];
 		forEachBlock(pages, function (b) {
 			if (b.type === 'table') finalizeTable(b, dict);
-			if (b.type === 'heading' && b.level === 2 && !b.caption) toc.push(b.text);
 		});
+
+		// Оглавление — два верхних уровня, функции вложены в разделы. Якоря —
+		// по алгоритму GitHub, повтор заголовка получает суффикс -1, -2 в порядке
+		// появления; нумерация идёт по всем заголовкам документа, включая ###:
+		// так считает и рендерер, иначе ссылка уведёт не туда.
+		var seen = {}, toc = [], seenTop = false;
+		for (i = 0; i < pages.length; i++) {
+			for (j = 0; j < pages[i].blocks.length; j++) {
+				var h = pages[i].blocks[j];
+				if (h.type !== 'heading') continue;
+				var slug = slugify(h.text);
+				if (seen[slug] === undefined) { seen[slug] = 0; } else { seen[slug]++; slug = slug + '-' + seen[slug]; }
+				h.slug = slug;
+				if (h.caption || h.level > 2) continue;
+				if (h.level === 1) seenTop = true;
+				toc.push({ text: h.text, slug: slug, nested: h.level === 2 && seenTop });
+			}
+		}
 		if (toc.length >= TOC_MIN_ITEMS) ctx.toc = toc;
 
 		// Пустые блоки — наша ошибка, а не свойство документа: отмечаем и убираем.
@@ -1978,6 +1994,16 @@
 			if ((dict[t] || shaped) && found.indexOf(t) === -1) found.push(t);
 		}
 		return found.length === 1 ? found[0] : null;
+	}
+
+	// Якорь по алгоритму GitHub/CommonMark: строчные; убрать всё, кроме букв,
+	// цифр, пробелов, дефисов и подчёркиваний; пробелы → дефис. Без \p{L} в ES5
+	// «буквы» задаём от противного: снимаем ASCII-пунктуацию и типографские
+	// знаки, остальное (кириллица в том числе) остаётся — рендереры её принимают.
+	var SLUG_STRIP_RE = /[!-,.\/:-@\[-^`{-~\u00A1-\u00BF\u2010-\u2027\u2030-\u205E]/g;
+
+	function slugify(text) {
+		return text.toLowerCase().replace(SLUG_STRIP_RE, '').trim().replace(/\s+/g, '-');
 	}
 
 	// Колонка идентификаторная, если большинство её значений — идентификаторы.
@@ -2247,11 +2273,15 @@
 			out.push(head.join('\n'));
 		}
 
-		// Оглавление — список функций без ссылок-якорей: `[X](#x)` стоит вдвое
-		// дороже голого `X`, а модели якорь не нужен.
+		// Оглавление со ссылками-якорями. Модели якорь не нужен — ей хватает
+		// совпадения имени в оглавлении и в заголовке; ссылки для человека в
+		// рендерере и агента с переходом к заголовку, и стоят они дёшево.
 		if (state.toc && state.toc.length) {
 			var toc = [];
-			for (i = 0; i < state.toc.length; i++) toc.push('- ' + state.toc[i]);
+			for (i = 0; i < state.toc.length; i++) {
+				var item = state.toc[i];
+				toc.push((item.nested ? '  ' : '') + '- [' + item.text.replace(/[\[\]]/g, '\\$&') + '](#' + item.slug + ')');
+			}
 			out.push(toc.join('\n'));
 		}
 
