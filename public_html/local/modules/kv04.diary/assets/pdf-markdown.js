@@ -1975,6 +1975,33 @@
 		}
 
 		lintChildTables(pages, ctx.options, warn);
+		lintIdentifierCells(pages, warn);
+	}
+
+	// Инвариант идентификаторной колонки: значение без пробела. Пробел между
+	// обрывками вида идентификатора — разорванное имя, которое склейка не
+	// собрала; чинить не пытаемся, только сигналим с функцией, подписью таблицы
+	// и значением. Кириллическая фраза в такой колонке — не разрыв, её не трогаем.
+	function lintIdentifierCells(pages, warn) {
+		var sections = sectionsOf(pages), i, j, r, c;
+		for (i = 0; i < sections.length; i++) {
+			var caption = '';
+			for (j = 0; j < sections[i].items.length; j++) {
+				var b = sections[i].items[j].block;
+				if (b.type === 'heading' && b.caption) { caption = b.text; continue; }
+				if (b.type !== 'table' || !b.matrix || !b.idCols) continue;
+				for (c = 0; c < b.columns; c++) {
+					if (!b.idCols[c]) continue;
+					for (r = firstDataRow(b); r < b.matrix.length; r++) {
+						var value = cellValue(b.matrix[r][c]);
+						if (!/\s/.test(value)) continue;
+						var tokens = value.split(/\s+/), broken = true;
+						for (var t = 0; t < tokens.length; t++) { if (!ID_FRAG_RE.test(tokens[t])) { broken = false; break; } }
+						if (broken) warn('cell-ident-space', sections[i].items[j].page, sections[i].name + ' ' + (caption || '-') + ' \u00AB' + value + '\u00BB');
+					}
+				}
+			}
+		}
 	}
 
 	// --- Линт: дочерняя таблица должна иметь родительское поле ---
@@ -2193,7 +2220,7 @@
 			var piece = cell.frags[i].text;
 			if (text === '') { text = piece; continue; }
 			if (cell.frags[i].start) {
-				var glued = glueIdentifier(text, piece, idMode, dict);
+				var glued = glueIdentifier(text, piece, idMode, dict, true);
 				if (glued !== null) { text = glued; continue; }
 				var item = piece.replace(CELL_LIST_RE, '');
 				text += (CELL_SENTENCE_END.test(text) ? ' ' : '; ') + item;
@@ -2205,7 +2232,7 @@
 	}
 
 	function glueLines(a, b, idMode, dict, prev, colRight) {
-		var glued = glueIdentifier(a, b, idMode, dict);
+		var glued = glueIdentifier(a, b, idMode, dict, false);
 		if (glued === null) glued = glueBroken(a, b, prev, colRight);
 		return glued !== null ? glued : joinTreeLines(a, b);
 	}
@@ -2238,16 +2265,18 @@
 
 	// ErrorDescripti|on — не дефект PDF, а систематический перенос Word внутри
 	// узкой ячейки. Склеиваем без пробела, когда целое — идентификатор в
-	// идентификаторной колонке или токен, встреченный в документе целиком; но
-	// не тогда, когда обрывок сам по себе известный токен — «Login» и
-	// «Password» строками одной ячейки склеивать нельзя.
-	function glueIdentifier(a, b, idMode, dict) {
+	// идентификаторной колонке или токен, встреченный в документе целиком.
+	// Защита «обрывок сам по себе известный токен» действует только между
+	// абзацами ячейки: «Login» и «Password» отдельными /P — два значения. Внутри
+	// абзаца она обманывает: перенесённый NomenclatureTable|Decrease начинается
+	// с имени другого поля, и без пробела он верен.
+	function glueIdentifier(a, b, idMode, dict, paraStart) {
 		var tail = /(\S+)$/.exec(a), head = /^(\S+)/.exec(b);
 		if (!tail || !head) return null;
 		if (!ID_FRAG_RE.test(tail[1]) || !ID_FRAG_RE.test(head[1])) return null;
-		if (dict && dict[tail[1]]) return null;
 		var whole = (tail[1] + head[1]).replace(/[.,;:)]+$/, '');
 		if (dict && dict[whole]) return a + b;
+		if (paraStart && dict && dict[tail[1]]) return null;
 		if (idMode && ID_RE.test(a + b)) return a + b;
 		return null;
 	}
