@@ -149,6 +149,10 @@
 		// Спека 0008 включала их намеренно — решение пересмотрено.
 		pageMarks: false,
 		frontMatter: true,
+		// Линт «дочерняя таблица ↔ родительское поле»: слова составных типов и
+		// имена корневых структур, у которых родителя нет по определению.
+		compositeTypes: ['структура', 'массив', 'таблица', 'объект', 'список', 'struct', 'structure', 'array', 'object', 'list', 'table'],
+		rootNames: [],
 		onProgress: null,
 		onPassword: null,
 		signal: null
@@ -1969,6 +1973,115 @@
 			}
 			pages[i].blocks = alive;
 		}
+
+		lintChildTables(pages, ctx.options, warn);
+	}
+
+	// --- Линт: дочерняя таблица должна иметь родительское поле ---
+	//
+	// «### T» внутри «## F» описывает состав поля T, значит выше в таблицах F
+	// должна быть строка с T в первой колонке и составным типом. Иначе либо
+	// подпись стоит не над своей таблицей (ошибка автора: «Таблица
+	// NomenclatureTable» над полями InvoiceTable), либо идентификатор в ячейке
+	// разорван (наш баг). Вывод не меняем — за автора не переименовываем, — но
+	// молчать нельзя: это ровно тот случай, когда модель свяжет таблицу не с тем
+	// полем. В подробности — составные поля функции без дочерней таблицы:
+	// подсказка, что с чем перепутано.
+	//
+	// Родителя нет по определению у корневых структур: OutputStructure стоит
+	// подписью в каждой функции, а полем — ни в одной. Список задаётся опцией
+	// rootNames; без неё корневым считается идентификатор, который ни разу не
+	// встречается полем во всём документе и при этом стоит подписью хотя бы в
+	// двух функциях.
+
+	function sectionsOf(pages) {
+		var sections = [], cur = null;
+		forEachBlock(pages, function (b, page) {
+			if (b.type === 'heading' && b.level <= 2 && !b.caption) {
+				cur = { name: b.text, items: [] };
+				sections.push(cur);
+				return;
+			}
+			if (cur) cur.items.push({ block: b, page: page.number });
+		});
+		return sections;
+	}
+
+	function cellValue(text) {
+		return String(text || '').replace(/`/g, '').trim();
+	}
+
+	function isIdTable(b) {
+		return b.type === 'table' && !!b.matrix && !!b.idCols && !!b.idCols[0];
+	}
+
+	function firstDataRow(b) {
+		return b.headerRows ? 1 : 0;
+	}
+
+	function isComposite(row, types) {
+		for (var c = 1; c < row.length; c++) {
+			if (types[cellValue(row[c]).toLowerCase()]) return true;
+		}
+		return false;
+	}
+
+	function lintChildTables(pages, options, warn) {
+		var types = {}, roots = {}, i, j, k, r, f;
+		for (i = 0; i < options.compositeTypes.length; i++) types[String(options.compositeTypes[i]).toLowerCase()] = true;
+		for (i = 0; i < options.rootNames.length; i++) roots[options.rootNames[i]] = true;
+
+		var sections = sectionsOf(pages);
+
+		// Поля всего документа и число функций, где идентификатор стоит подписью.
+		var fieldAnywhere = {}, captionSections = {};
+		for (i = 0; i < sections.length; i++) {
+			var seenCaption = {};
+			for (j = 0; j < sections[i].items.length; j++) {
+				var b = sections[i].items[j].block;
+				if (isIdTable(b)) {
+					for (k = firstDataRow(b); k < b.matrix.length; k++) fieldAnywhere[cellValue(b.matrix[k][0])] = true;
+				}
+				if (b.type === 'heading' && b.caption && ID_RE.test(b.text) && !seenCaption[b.text]) {
+					seenCaption[b.text] = true;
+					captionSections[b.text] = (captionSections[b.text] || 0) + 1;
+				}
+			}
+		}
+
+		for (i = 0; i < sections.length; i++) {
+			var sec = sections[i], composite = {}, children = {};
+			for (j = 0; j < sec.items.length; j++) {
+				var x = sec.items[j].block;
+				if (isIdTable(x)) {
+					for (k = firstDataRow(x); k < x.matrix.length; k++) {
+						var name = cellValue(x.matrix[k][0]);
+						if (name && isComposite(x.matrix[k], types)) composite[name] = true;
+					}
+				}
+				if (x.type === 'heading' && x.caption && ID_RE.test(x.text)) children[x.text] = true;
+			}
+			var orphans = [];
+			for (f in composite) { if (composite.hasOwnProperty(f) && !children[f]) orphans.push(f); }
+
+			for (j = 0; j < sec.items.length; j++) {
+				var h = sec.items[j].block;
+				if (h.type !== 'heading' || !h.caption || !ID_RE.test(h.text)) continue;
+				if (roots[h.text]) continue;
+				if (!fieldAnywhere[h.text] && captionSections[h.text] >= 2) continue;
+				var found = false;
+				for (k = 0; k < j && !found; k++) {
+					var t = sec.items[k].block;
+					if (!isIdTable(t)) continue;
+					for (r = firstDataRow(t); r < t.matrix.length; r++) {
+						if (cellValue(t.matrix[r][0]) === h.text && isComposite(t.matrix[r], types)) { found = true; break; }
+					}
+				}
+				if (found) continue;
+				warn('child-table-no-parent', sec.items[j].page,
+					sec.name + ' ' + h.text + ' (orphan composite fields: ' + (orphans.length ? orphans.join(', ') : 'none') + ')');
+			}
+		}
 	}
 
 	// Подпись таблицы — её имя, если в ней ровно один идентификатор. Тогда
@@ -2311,13 +2424,15 @@
 		var state = { pages: 0, truncated: false, chars: 0, rawChars: 0, treeChars: 0, toc: null };
 		var warnings = [], warned = {};
 
-		function warn(code, page) {
-			// По одному предупреждению на код и страницу: сотня одинаковых
-			// строк в статусе ничего не сообщает.
-			var key = code + ':' + (page || 0);
+		function warn(code, page, detail) {
+			// По одному предупреждению на код и страницу (и на подробность, когда
+			// она есть): сотня одинаковых строк в статусе ничего не сообщает.
+			var key = code + ':' + (page || 0) + (detail ? ':' + detail : '');
 			if (warned[key]) return;
 			warned[key] = true;
-			warnings.push({ code: code, page: page || 0 });
+			var entry = { code: code, page: page || 0 };
+			if (detail) entry.detail = detail;
+			warnings.push(entry);
 		}
 
 		function aborted() {
