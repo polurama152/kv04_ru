@@ -72,13 +72,11 @@
 	// четверть строк, а все.
 	var COL_CROSS_MAX = 0.25;
 	var COL_MAX_DEPTH = 2;
-	var COL_VOTE = 0.6;
 
 	var REPEAT_MIN_PAGES = 4;    // на трёх страницах повтор неотличим от текста
 	var HEADER_BAND = 0.1;       // ≈30 мм на A4 — больше любого колонтитула
 	var REPEAT_RATIO = 0.5;      // колонтитул чередуется чёт/нечет: 0.8 его упустит
 	var HEAD_MAX_CHARS = 120;    // повторяющийся абзац — это дисклеймер, не колонтитул
-	var FOOTNOTE_RATIO = 0.85;
 
 	// Минимальный живой шаг типографики — 1.15 (10pt тело → 12pt подзаголовок).
 	// 1.12 его ловит и отсекает шум округления метрик.
@@ -99,7 +97,6 @@
 	var INDENT_EPS = 0.5;
 	var LIST_MAX_DEPTH = 4;
 	var LIST_SEQ_MIN = 2;
-	var BULLET_GAP = 0.3;
 	var DASH_LIST_MIN = 2;
 
 	var TABLE_MIN_ROWS = 3;
@@ -128,7 +125,6 @@
 	var CODE_MAX_PAD = 20;
 	var FENCE = String.fromCharCode(96, 96, 96);
 	var MONO_CHAR_W = 0.6;       // ширина знака моноширинных — ровно 0.6 em
-	var MONO_STDEV = 0.02;
 
 	var TOC_LINE_RATIO = 0.6;
 	var GARBAGE_PAGE = 0.2;
