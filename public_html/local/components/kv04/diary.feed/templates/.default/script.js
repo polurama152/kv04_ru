@@ -300,6 +300,14 @@
 		});
 	}
 
+	// Всё, что надо сделать со свежеотрисованными заметками. Прежде здесь
+	// стояла одна подсветка, и каждое новое действие пришлось бы дописывать в
+	// семь мест сразу — а забыть одно из них ничего не стоит.
+	function refreshNotes(scope) {
+		highlight(scope);
+		syncMdButtons(scope);
+	}
+
 	window.kv04DiaryHighlight = highlight;
 	function setError(msg) {
 		error.hidden = !msg;
@@ -628,7 +636,7 @@
 		splitBlocksHtml(html).forEach(function (block, index) {
 			body.appendChild(buildBlock(block.html, index));
 		});
-		highlight(body);
+		refreshNotes(body);
 	}
 
 	// Разметка должна совпадать с kv04DiaryRenderItems() в этом же файле:
@@ -684,7 +692,7 @@
 	function insertNewNote(item) {
 		var note = createNoteElement(item);
 		list.insertBefore(note, list.firstChild);
-		highlight(note);
+		refreshNotes(note);
 		return note;
 	}
 
@@ -1558,7 +1566,7 @@
 
 	function isNoteEditClick(e, note) {
 		if (note.classList.contains('is-editing')) return false;
-		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], [data-share-note], [data-share-block], [data-share-media], .kv04-edit-bar, a[href]')) {
+		if (e.target.closest('.kv04-media-thumb, .kv04-media-item__remove, .kv04-note__media, [data-delete], [data-media-delete], [data-block-delete], [data-share-note], [data-share-block], [data-share-media], [data-md-download], .kv04-edit-bar, a[href]')) {
 			return false;
 		}
 		return e.target.closest('.kv04-note') === note;
@@ -1784,6 +1792,12 @@
 		var note = e.target.closest('.kv04-note');
 		if (!note) return;
 		var id = note.getAttribute('data-id');
+		if (e.target.closest('[data-md-download]')) {
+			e.preventDefault();
+			e.stopPropagation();
+			downloadMarkdown(note);
+			return;
+		}
 		if (e.target.closest('[data-media-delete]')) {
 			e.preventDefault();
 			e.stopPropagation();
@@ -1996,7 +2010,7 @@
 			(data.items || []).forEach(function (item) {
 				list.appendChild(createNoteElement(item));
 			});
-			highlight(list);
+			refreshNotes(list);
 			linkify(list);
 
 			booksList.querySelectorAll('.kv04-book').forEach(function (tile) {
@@ -2116,7 +2130,7 @@
 			}
 		}
 		list.insertBefore(note, before);
-		highlight(note);
+		refreshNotes(note);
 	}
 
 	// Заметка могла остаться в ленте (вернули её кусок) или исчезнуть
@@ -2126,7 +2140,7 @@
 		var existing = list.querySelector('.kv04-note[data-id="' + item.id + '"]');
 		if (existing) {
 			existing.replaceWith(fresh);
-			highlight(fresh);
+			refreshNotes(fresh);
 			return;
 		}
 		insertNoteInOrder(fresh, item.id);
@@ -2301,13 +2315,13 @@
 		});
 	}
 
-	highlight();
+	refreshNotes();
 	// Лента приходит с сервера обычным текстом: ссылки навешиваем здесь.
 	linkify(list);
 
 	// Подсвечиваем только добавленные узлы. Пока заметки появлялись через
 	// перезагрузку страницы, наблюдатель почти не срабатывал; теперь они
-	// добавляются динамически, и highlight(list) на каждой вставке
+	// добавляются динамически, и refreshNotes(list) на каждой вставке
 	// перекрашивал бы всю ленту.
 	if (window.MutationObserver && list) {
 		var highlightTimer = null;
@@ -2324,7 +2338,7 @@
 				var nodes = pendingNodes;
 				pendingNodes = [];
 				nodes.forEach(function (node) {
-					if (node.isConnected) highlight(node);
+					if (node.isConnected) refreshNotes(node);
 				});
 			}, 50);
 		});
@@ -2600,6 +2614,92 @@
 			pdfInput.value = '';
 			if (file) runPdf(file);
 		});
+	}
+
+
+	// --- Скачать разобранный PDF файлом ------------------------------------
+	//
+	// Кнопка появляется только у заметок, которые сделал конвертер, и узнаёт их
+	// по шапке, которую он сам и пишет. Признака в базе нет намеренно: разбор
+	// ничего не добавлял в схему, и заметки, заведённые до появления кнопки,
+	// получают её наравне с новыми.
+
+	var MD_FRONT_MATTER = /^---\r?\n([\s\S]{0,600}?)\r?\n---(?:\r?\n|$)/;
+
+	function parsedPdfHead(text) {
+		var m = MD_FRONT_MATTER.exec(text);
+		if (!m) return null;
+		// Строку pages конвертер пишет всегда, остальные — по обстоятельствам.
+		// Без неё перед нами просто текст, начатый с трёх дефисов.
+		if (!/^pages:\s*\d+\s*$/m.test(m[1])) return null;
+		return m[1];
+	}
+
+	function mdFileName(head, note) {
+		var found = /^file:\s*(.+?)\s*$/m.exec(head) || /^title:\s*(.+?)\s*$/m.exec(head);
+		var name = found ? found[1] : ('заметка-' + (note.getAttribute('data-id') || ''));
+		name = name.replace(/\.pdf$/i, '');
+		// Слэши и двоеточия в имени файла не примут ни система, ни браузер.
+		name = name.replace(/[\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+		return (name || 'заметка') + '.md';
+	}
+
+	// Текст заметки без интерфейса: крестики и «Поделиться» живут прямо в теле,
+	// и без клона они уехали бы в файл вместе с текстом.
+	function noteText(note) {
+		var body = note.querySelector('.kv04-note__body');
+		if (!body) return '';
+		var copy = body.cloneNode(true);
+		var buttons = copy.querySelectorAll('button');
+		for (var i = 0; i < buttons.length; i++) {
+			buttons[i].parentNode.removeChild(buttons[i]);
+		}
+		return textWithBreaks(copy);
+	}
+
+	function downloadMarkdown(note) {
+		var text = noteText(note);
+		var head = parsedPdfHead(text);
+		if (!head) return;
+
+		// Blob, а не data:URL: разобранный документ на сотню страниц в адрес не
+		// влезает, и часть браузеров обрывает такую ссылку молча.
+		var url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+		var link = document.createElement('a');
+		link.href = url;
+		link.download = mdFileName(head, note);
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		// Адрес отзываем с запасом: загрузка начинается не в том же тике, а по
+		// освобождённому адресу браузер сохранил бы пустой файл.
+		setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+	}
+
+	function syncMdButton(note) {
+		var button = note.querySelector('[data-md-download]');
+		if (!parsedPdfHead(noteText(note))) {
+			// Шапку могли удалить блоком или правкой — тогда и кнопке не место.
+			if (button) button.parentNode.removeChild(button);
+			return;
+		}
+		if (button) return;
+
+		button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'kv04-note__md kv04-btn kv04-btn--muted kv04-btn--sm';
+		button.setAttribute('data-md-download', '');
+		button.title = 'Сохранить разобранный текст файлом .md';
+		button.textContent = 'Скачать md';
+		note.insertBefore(button, note.firstChild);
+	}
+
+	function syncMdButtons(scope) {
+		var root = scope && scope.querySelectorAll ? scope : list;
+		// Перерисовать могли как всю ленту, так и одно тело заметки.
+		var own = root.closest ? root.closest('.kv04-note') : null;
+		if (own) syncMdButton(own);
+		root.querySelectorAll('.kv04-note').forEach(syncMdButton);
 	}
 
 })();

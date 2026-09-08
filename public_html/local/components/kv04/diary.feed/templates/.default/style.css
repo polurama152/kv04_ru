@@ -868,6 +868,15 @@ body.kv04-lightbox-open {
 	margin-top: 0;
 }
 
+/* Над текстом и по центру: заметка из разобранного PDF длинная, и кнопка,
+   стоящая внизу, нашлась бы только прокруткой. Селектор из двух классов —
+   чтобы поля не перебило правило выше. */
+.kv04-note .kv04-note__md {
+	display: flex;
+	margin: 0 auto 0.4rem;
+	max-width: 100%;
+}
+
 @media (min-width: 768px) {
 	.kv04-media-grid--1 {
 		width: min(100%, 380px);
