@@ -126,6 +126,14 @@
 	var FENCE = String.fromCharCode(96, 96, 96);
 	var MONO_CHAR_W = 0.6;       // ширина знака моноширинных — ровно 0.6 em
 
+	// Пробел на конце строки как признак переноса (см. markSpaceAfter). Сигнал
+	// включается на документ целиком: двадцати переносов хватает, чтобы понять
+	// генератор, а доля 0.8 отделяет тех, кто пробел пишет всегда (Word, Google
+	// Docs, Pages, Foxit: 0.9–1.0), от тех, кто не пишет никогда (LibreOffice,
+	// печать из Chromium, ReportLab, Quartz: 0). Между ними никого нет.
+	var WRAP_SIGNAL_MIN = 20;
+	var WRAP_SIGNAL_SHARE = 0.8;
+
 	var TOC_LINE_RATIO = 0.6;
 	var GARBAGE_PAGE = 0.2;
 	var NO_TEXT_PROBE = 5;
@@ -331,12 +339,83 @@
 				font: it.fontName,
 				mono: !!(style && style.fontFamily === 'monospace'),
 				mc: markedOwner(stack),
-				bold: !!(fontBold && fontBold[it.fontName])
+				bold: !!(fontBold && fontBold[it.fontName]),
+				spaceAfter: it.spaceAfter
 			});
 		}
 
 		raw.sort(function (a, b) { return a.y - b.y || a.x - b.x; });
 		return raw;
+	}
+
+	// --- Пробел на конце строки ----------------------------------------------
+	//
+	// Слово, разорванное шириной ячейки («ErrorDescripti|on», «YYYY-MM-DDT|
+	// hh:mm:ss»), и обычный перенос по словам в getTextContent неотличимы:
+	// pdf.js выбрасывает настоящие пробельные глифы и синтезирует свои по
+	// расстоянию, а на конце строки расстояния нет. Зато в списке операторов
+	// глифы лежат как есть, и генераторы, которые переносят по словам, пишут
+	// пробел перед разрывом строки, а рвущие слово — нет. Оба потока идут в
+	// порядке содержимого страницы, поэтому фрагменты выравниваются по
+	// последовательности непробельных символов, без координат и MCID.
+	// Каждый фрагмент получает spaceAfter: стоял ли за его последним символом
+	// пробельный глиф. Расхождение символов (лигатура, ActualText) — страница
+	// остаётся без признака и читается как прежде.
+	function markSpaceAfter(items, opList, OPS) {
+		var chars = [], after = [], i, j, k;
+		for (i = 0; i < opList.fnArray.length; i++) {
+			if (opList.fnArray[i] !== OPS.showText) continue;
+			var glyphs = opList.argsArray[i] && opList.argsArray[i][0];
+			if (!glyphs) continue;
+			for (j = 0; j < glyphs.length; j++) {
+				var g = glyphs[j];
+				if (!g || typeof g.unicode !== 'string' || g.unicode === '') continue;
+				for (k = 0; k < g.unicode.length; k++) {
+					var ch = g.unicode.charAt(k);
+					if (/\s/.test(ch)) {
+						if (after.length) after[after.length - 1] = true;
+						continue;
+					}
+					chars.push(ch);
+					after.push(false);
+				}
+			}
+		}
+		if (!chars.length) return false;
+
+		var pos = 0;
+		for (i = 0; i < items.length; i++) {
+			var it = items[i];
+			if (!it || typeof it.str !== 'string') continue;
+			var text = it.str.replace(/\s+/g, '');
+			if (text === '') continue;
+			for (j = 0; j < text.length; j++) {
+				if (pos >= chars.length || chars[pos] !== text.charAt(j)) return false;
+				pos++;
+			}
+			it.spaceAfter = after[pos - 1];
+		}
+		return pos === chars.length;
+	}
+
+	// Доля переносов строки с пробелом перед ними — по фрагментам одного
+	// элемента дерева: внутри абзаца соседние по (y, x) фрагменты на разных
+	// строках и есть перенос.
+	function countWrapSpaces(raw, counts) {
+		var byMc = {}, i, k;
+		for (i = 0; i < raw.length; i++) {
+			var r = raw[i];
+			if (!r.mc || r.spaceAfter === undefined) continue;
+			(byMc[r.mc] = byMc[r.mc] || []).push(r);
+		}
+		for (k in byMc) {
+			if (!byMc.hasOwnProperty(k)) continue;
+			var list = byMc[k];
+			for (i = 0; i + 1 < list.length; i++) {
+				if (list[i + 1].y - list[i].y <= LINE_Y_TOL * list[i].size) continue;
+				if (list[i].spaceAfter) counts.space++; else counts.noSpace++;
+			}
+		}
 	}
 
 	function markedOwner(stack) {
@@ -445,6 +524,9 @@
 			x0: parts[0].x,
 			x1: last.x + last.w,
 			size: bestSize || group.anchorSize,
+			// Пробел за последним фрагментом строки: true — перенос по словам,
+			// false — слово разорвано, undefined — признака нет.
+			spaceEnd: last.spaceAfter,
 			gaps: gaps,
 			cells: cells,
 			leader: leader,
@@ -1319,7 +1401,7 @@
 	// переносится; здесь он только нормализует имя.
 	var FUNC_RE = /^(?:Функция|Function|Метод|Method|Процедура|Procedure)\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:[-\u2010\u2013\u2014:]\s*)?(.*)$/;
 	var CELL_LIST_RE = /^[-\u2010\u2013\u2014\u2022\u25AA\u25CF\u00B7\uE000-\uF8FF]\s*/;
-	var CELL_SENTENCE_END = /[:.!?;]$/;
+	var CELL_SENTENCE_END = /[:.!?;,]$/;
 	var HEAD_TAIL_PUNCT = /[.!?;:,]$/;
 	var CAPTION_TAIL_PUNCT = /[.!?;,]$/;
 	var BOLD_FONT_RE = /bold|black|heavy|semibold|demibold/i;
@@ -1474,31 +1556,39 @@
 		out.push(block);
 	}
 
-	// Строки абзаца дерева: перенос со знаком — dehyphenate, разорванный адрес
-	// — без пробела (URL с пробелом внутри для модели мусор), иначе пробел.
+	// Строки абзаца дерева: слово, разорванное без пробела (hard, см.
+	// markSpaceAfter) — встык, и дефис на разрыве настоящий; перенос со знаком
+	// — dehyphenate; разорванный адрес — без пробела (URL с пробелом внутри для
+	// модели мусор); иначе пробел.
 	var URL_TAIL_RE = /https?:\/\/[^\s()]*$/;
 
-	function joinTreeLines(a, b) {
+	function joinTreeLines(a, b, hard) {
+		if (hard) return a + b;
 		var glued = dehyphenate(a, b);
 		if (glued !== null) return glued;
 		if (URL_TAIL_RE.test(a) && /^[^\s(]/.test(b)) return a + b;
 		return a + ' ' + b;
 	}
 
+	function hardBreak(ctx, prevLine) {
+		return !!(ctx.wrapSignal && prevLine && prevLine.spaceEnd === false);
+	}
+
 	function paraBlock(para, ctx) {
 		var sorted = para.items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; });
 		var lines = linesFromRaw(sorted);
 
-		var text = '', lineTexts = [], geo = [], sizes = {}, i;
+		var text = '', lineTexts = [], geo = [], sizes = {}, i, prevLine = null;
 		for (i = 0; i < lines.length; i++) {
 			var piece = stripPua(lines[i].text, ctx);
 			if (piece === '') continue;
 			lineTexts.push(piece);
-			geo.push({ x1: lines[i].x1, size: lines[i].size });
+			geo.push({ x1: lines[i].x1, size: lines[i].size, spaceEnd: lines[i].spaceEnd });
 			var key = lines[i].size.toFixed(1);
 			sizes[key] = (sizes[key] || 0) + piece.length;
-			if (text === '') { text = piece; continue; }
-			text = joinTreeLines(text, piece);
+			if (text === '') { text = piece; prevLine = lines[i]; continue; }
+			text = joinTreeLines(text, piece, hardBreak(ctx, prevLine));
+			prevLine = lines[i];
 		}
 
 		if (text === '') {
@@ -1650,7 +1740,7 @@
 	function pushFrags(frags, lines, geo) {
 		for (var j = 0; j < lines.length; j++) {
 			var g = geo && geo[j];
-			frags.push({ text: lines[j], start: j === 0, x1: g ? g.x1 : undefined, size: g ? g.size : 0 });
+			frags.push({ text: lines[j], start: j === 0, x1: g ? g.x1 : undefined, size: g ? g.size : 0, spaceEnd: g ? g.spaceEnd : undefined });
 		}
 	}
 
@@ -1742,7 +1832,7 @@
 					for (c = 0; c < b.rows[r].cells.length; c++) {
 						var cell = b.rows[r].cells[c];
 						if (!cell.frags.length) continue;
-						var text = cellText(cell, false, null);
+						var text = cellText(cell, false, null, undefined, ctx.wrapSignal);
 						if (text) kept.push({ type: 'para', role: 'P', text: text, lines: [text], size: 0, bold: false, y: 0 });
 					}
 				}
@@ -1771,10 +1861,13 @@
 				var body = head.rows.slice(head.headerRows);
 				// Строка, разорванная разрывом страницы: её хвост приходит строкой с
 				// пустой первой ячейкой — дописываем в последнюю строку, а не заводим
-				// новую.
+				// новую. Первый фрагмент хвоста — продолжение абзаца, оборванного
+				// внизу страницы, а не новый абзац: Word и Docs размечают остаток
+				// отдельным /P, но «функцией» + «CreateOrder» это одна фраза.
 				if (body.length && tail.rows.length > tail.headerRows && !body[0].cells[0].frags.length) {
 					var last = tail.rows[tail.rows.length - 1];
 					for (var c = 0; c < last.cells.length && c < body[0].cells.length; c++) {
+						if (last.cells[c].frags.length && body[0].cells[c].frags.length) body[0].cells[c].frags[0].cont = true;
 						last.cells[c].frags = last.cells[c].frags.concat(body[0].cells[c].frags);
 						last.cells[c].plain = (last.cells[c].plain + ' ' + body[0].cells[c].plain).trim();
 					}
@@ -1939,7 +2032,7 @@
 		}
 
 		forEachBlock(pages, function (b) {
-			if (b.type === 'table') finalizeTable(b, dict);
+			if (b.type === 'table') finalizeTable(b, dict, ctx.wrapSignal);
 		});
 
 		// Оглавление — два верхних уровня, функции вложены в разделы. Якоря —
@@ -2167,7 +2260,7 @@
 		return cols;
 	}
 
-	function finalizeTable(table, dict) {
+	function finalizeTable(table, dict, wrapSignal) {
 		var idCols = identifierColumns(table), matrix = [], r, c, f, filled = 0;
 		// Правый край колонки — самая длинная её строка: токен, разорванный по
 		// ширине ячейки, упирается именно в него.
@@ -2184,7 +2277,7 @@
 			var line = [];
 			for (c = 0; c < table.columns; c++) {
 				var cell = table.rows[r].cells[c];
-				var text = cellText(cell, idCols[c], dict, colRight[c]);
+				var text = cellText(cell, idCols[c], dict, colRight[c], wrapSignal);
 				if (text !== '') filled++;
 				if (text !== '' && !cell.header) text = markIdentifiers(text, idCols[c], dict);
 				line.push(text);
@@ -2212,26 +2305,51 @@
 
 	// Текст ячейки из фрагментов. Новый абзац внутри ячейки — элемент перечня
 	// («Истина – аналог; Ложь – оригинал»), если предыдущий не закончился
-	// двоеточием или точкой; тогда просто продолжение. Строка внутри абзаца —
-	// перенос: слова через пробел, идентификаторы — без.
-	function cellText(cell, idMode, dict, colRight) {
-		var text = '';
+	// двоеточием, точкой или запятой; тогда просто продолжение. Маркер,
+	// оставшийся на строке один («-» и «Зарезервирован» строкой ниже), пункта не
+	// открывает — пункт начнёт следующий фрагмент. Абзац, продолжающий строку с
+	// прошлой страницы (cont), — перенос, если не начинается с маркера и его
+	// первое слово не влезало в прошлую строку: влезало бы — автор начал новый
+	// абзац сам («излишек» и «<0 …» под ним). Строка внутри абзаца — перенос:
+	// слова через пробел, идентификаторы — без.
+	function cellText(cell, idMode, dict, colRight, wrapSignal) {
+		var text = '', pending = false;
 		for (var i = 0; i < cell.frags.length; i++) {
-			var piece = cell.frags[i].text;
+			var frag = cell.frags[i], piece = frag.text;
 			if (text === '') { text = piece; continue; }
-			if (cell.frags[i].start) {
-				var glued = glueIdentifier(text, piece, idMode, dict, true);
-				if (glued !== null) { text = glued; continue; }
+			var continues = frag.cont && !CELL_LIST_RE.test(piece) && !CELL_SENTENCE_END.test(text)
+				&& !wordFits(cell.frags[i - 1], colRight, piece);
+			var newPara = frag.start && !continues;
+			if (newPara || pending) {
+				if (!pending) {
+					var glued = glueIdentifier(text, piece, idMode, dict, true);
+					if (glued !== null) { text = glued; continue; }
+				}
 				var item = piece.replace(CELL_LIST_RE, '');
+				if (item === '') { pending = true; continue; }
+				pending = false;
 				text += (CELL_SENTENCE_END.test(text) ? ' ' : '; ') + item;
 				continue;
 			}
-			text = glueLines(text, piece, idMode, dict, cell.frags[i - 1], colRight);
+			text = glueLines(text, piece, idMode, dict, cell.frags[i - 1], colRight, wrapSignal);
 		}
 		return text.replace(/\s+/g, ' ').trim();
 	}
 
-	function glueLines(a, b, idMode, dict, prev, colRight) {
+	// Влезло бы первое слово строки b в конец строки prev? Ширина знака — 0.55 em,
+	// среднее для пропорциональных шрифтов; точность здесь не нужна: решение
+	// меняется от слова в два знака к слову в десять, а не на полузнаке.
+	var AVG_CHAR_W = 0.55;
+
+	function wordFits(prev, colRight, b) {
+		if (!prev || prev.x1 === undefined || !isFinite(colRight)) return false;
+		var word = /^(\S+)/.exec(b);
+		if (!word) return false;
+		return colRight - prev.x1 >= word[1].length * AVG_CHAR_W * (prev.size || 1);
+	}
+
+	function glueLines(a, b, idMode, dict, prev, colRight, wrapSignal) {
+		if (wrapSignal && prev && prev.spaceEnd === false) return a + b;
 		var glued = glueIdentifier(a, b, idMode, dict, false);
 		if (glued === null) glued = glueBroken(a, b, prev, colRight);
 		return glued !== null ? glued : joinTreeLines(a, b);
@@ -2244,11 +2362,13 @@
 	// оставляет зазор шириной в недошедшее слово. Чтобы не склеить обычный
 	// перенос, попавший в зазор случайно, хвост должен быть код-подобным
 	// латинским токеном с пунктуацией внутри, а голова — обрывком без гласных
-	// или с пунктуации; для косой черты допускается и русское слово, если
-	// алфавит по обе стороны разрыва один.
+	// или с пунктуации, либо сама код-подобной («hh:mm:ss»); для косой черты
+	// допускается и русское слово, если алфавит по обе стороны разрыва один.
+	// Это запасной путь: документ с пробелами на концах строк (wrapSignal)
+	// решает по факту и сюда не доходит.
 	var BREAK_SLACK = 0.9;
 	var CODE_TAIL_RE = /^[A-Za-z0-9]+[-:_\/.][A-Za-z0-9:_\-\/.]*$/;
-	var CODE_HEAD_RE = /^(?:[-:_\/.][A-Za-z0-9:_\-\/.]*|[b-df-hj-np-tv-zB-DF-HJ-NP-TV-Z0-9:_\-\/.]{1,6})$/;
+	var CODE_HEAD_RE = /^(?:[-:_\/.][A-Za-z0-9:_\-\/.]*|[b-df-hj-np-tv-zB-DF-HJ-NP-TV-Z0-9:_\-\/.]{1,6}|[A-Za-z0-9]+[-:_\/.][A-Za-z0-9:_\-\/.]*)$/;
 	var SLASH_TAIL_RE = /\/[^\s\/]*[a-zа-яё]$/;
 
 	function glueBroken(a, b, prev, colRight) {
@@ -2450,7 +2570,7 @@
 
 	function convert(file, userOptions) {
 		var options = extend(DEFAULTS, userOptions);
-		var state = { pages: 0, truncated: false, chars: 0, rawChars: 0, treeChars: 0, toc: null };
+		var state = { pages: 0, truncated: false, chars: 0, rawChars: 0, treeChars: 0, toc: null, wrap: { space: 0, noSpace: 0 } };
 		var warnings = [], warned = {};
 
 		function warn(code, page, detail) {
@@ -2544,6 +2664,7 @@
 			var metrics = measureBody(pages);
 			var sizeLevels = headingSizeLevels(pages, metrics.bodySize);
 			var repeats = collectRepeats(pages);
+			var wrapTotal = state.wrap.space + state.wrap.noSpace;
 
 			var ctx = {
 				options: options,
@@ -2567,7 +2688,10 @@
 				ragged: false,
 				dropToc: false,
 				treeHeadingRoles: false,
-				toc: null
+				toc: null,
+				// Генератор пишет пробел перед переносом строки — тогда его
+				// отсутствие значит разорванное слово (см. markSpaceAfter).
+				wrapSignal: wrapTotal >= WRAP_SIGNAL_MIN && state.wrap.space / wrapTotal >= WRAP_SIGNAL_SHARE
 			};
 
 			if (outline) {
@@ -2658,9 +2782,18 @@
 					]).then(function (both) {
 						var content = both[0];
 						var tree = both[1] && both[1].children && both[1].children.length ? both[1] : null;
-						// Имена шрифтов нужны только дереву: на них держится правило
-						// «жирный абзац — заголовок».
-						return ensureFonts(page, content.items, tree ? fontBold : null).then(function () {
+						if (!tree) return readPage(page, viewport, content, tree, n);
+						// Список операторов нужен только дереву: из него берутся
+						// пробельные глифы на концах строк (markSpaceAfter) и имена
+						// шрифтов, на которых держится правило «жирный абзац —
+						// заголовок». Картинки при этом не декодируются (maxImageSize).
+						return page.getOperatorList().then(function (opList) {
+							if (!markSpaceAfter(content.items, opList, pdfjsLib.OPS)) warn('glyph-align-failed', n);
+						}, function () {
+							warn('glyph-align-failed', n);
+						}).then(function () {
+							return ensureFonts(page, content.items, fontBold);
+						}).then(function () {
 							return readPage(page, viewport, content, tree, n);
 						});
 					});
@@ -2690,6 +2823,7 @@
 			// Карта MCID → фрагменты и доля знаков, покрытых деревом.
 			var ids = tree ? collectContentIds(tree, {}) : null;
 			if (ids) adoptOrphans(built.raw, ids);
+			if (ids) countWrapSpaces(built.raw, state.wrap);
 			var mc = {}, rawChars = 0, treeChars = 0;
 			for (i = 0; i < built.raw.length; i++) {
 				var r = built.raw[i];
